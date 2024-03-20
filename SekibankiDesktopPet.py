@@ -40,6 +40,11 @@ class DesktopPet(QWidget):
         self.__facingDirection = None
         #The array containing the states for desktopPet
         self.normalStates = ["normalState/Sekibanki1 right.gif", "normalState/Sekibanki1 left.gif"]
+        
+        #Constants
+        self.WINDOWWIDTH = QApplication.primaryScreen().size().width()
+        self.WINDOWHEIGHT = QApplication.primaryScreen().size().height()
+        
 
 
     def _initTrayIcon(self):
@@ -74,8 +79,8 @@ class DesktopPet(QWidget):
         #randomly choose a starting facing direction for pet
         self._changeFacingDirection(random.randint(0,1))
 
-        #Resize window according to the loaded image
-        self.resize(600, 600)
+        # #Resize window according to the loaded imagese
+        self.resize(421, 372)
         
         #go to a random position on the desktop
         randomPos = self._randomPos()
@@ -90,39 +95,46 @@ class DesktopPet(QWidget):
     def _initStandBy(self):
         #Create a timer for wandering function, where the pet moves around the desktop
         self._wanderingTimer = QTimer(self)
+        #once the timer time out, trigger _wandering function
         self._wanderingTimer.timeout.connect(self._wandering)
-        self._wanderingTimer.setInterval(random.randint(6, 10)*1000)
+        #set the interval for 
+        self._wanderingTimer.setInterval(random.randint(10, 30)*1000)
         self._wanderingTimer.start()
-
+        
+        #Create a timer for standby phase, the logic is the same with wandering timer
+        self._speechBubbleTimer = QTimer(self)
+        self._speechBubbleTimer.timeout.connect(self._speechBubbling)
+        self._speechBubbleTimer.setInterval(random.randint(20, 120)*1000) # 20 ~ 120 seconds
+        self._speechBubbleTimer.start()
 
     #the function for wandering, becauses it involves a loop that can't be put in the main loop, we need another thread for it
     def _wandering(self):
         #create a thread to run subprocess
         self._wanderingThread = QThread()
         #create the wandering class and pass in self(DesktopPet)
-        self._wanderClass = self._wanderingThreadClass(self)
+        self._wanderingWork = self._WanderingWork(self)
         #Add wandering class to thread to be run
-        self._wanderClass.moveToThread(self._wanderingThread)
+        self._wanderingWork.moveToThread(self._wanderingThread)
         #Connect run signal of wandering thread to the start of run function
-        self._wanderingThread.started.connect(self._wanderClass.run)
+        self._wanderingThread.started.connect(self._wanderingWork.run)
         #quit the thread if run finished
-        self._wanderClass.finished.connect(self._wanderingThread.quit)
+        self._wanderingWork.finished.connect(self._wanderingThread.quit)
         #delete both the thread and class from memory upon finished
-        self._wanderClass.finished.connect(self._wanderClass.deleteLater)
+        self._wanderingWork.finished.connect(self._wanderingWork.deleteLater)
         self._wanderingThread.finished.connect(self._wanderingThread.deleteLater)
 
         #Move desktop Pet upon receiving the signal date
-        self._wanderClass.moveSignal.connect(lambda coor: self.move(coor[0], coor[1]))
+        self._wanderingWork.moveSignal.connect(lambda coor: self.move(coor[0], coor[1]))
 
         #Change the facing of pet upon reciving the facing data
-        self._wanderClass.changeFacingDirectionSignal.connect(lambda facing: self._changeFacingDirection(facing))
+        self._wanderingWork.changeFacingDirectionSignal.connect(lambda facing: self._changeFacingDirection(facing))
 
         #Start the thread 
         self._wanderingThread.start()
 
         
     #create a class that inherites QObject so QThread recognizes and runs it
-    class _wanderingThreadClass(QObject):
+    class _WanderingWork(QObject):
         #Create a signal to indicate the end of the thread process
         finished = pyqtSignal()
         moveSignal = pyqtSignal(list)
@@ -135,16 +147,14 @@ class DesktopPet(QWidget):
             self.mainWindow = mw
 
         def run(self):
-            print("move")
             #The range of movement distance is movementrange "MR" pixel to both side
             #Get the current position
             currentPos = self.mainWindow.pos()
-            screenSize = QDesktopWidget().screenGeometry(0)
+            screenSize = QApplication.primaryScreen().size()
             mr = 300
-            #random a destine position with random.randint(a,b). a and b equals to either 0 or maxscreen width/height if out of screen. (that's some long ass code!)
-            xDestiny = random.randint(currentPos.x() - mr if currentPos.x() > mr else 0, currentPos.x() + mr if screenSize.x() - mr < currentPos.x() else screenSize.x())
-            yDestiny = random.randint(currentPos.y() - mr if currentPos.y() > mr else 0, currentPos.y() + mr if screenSize.y() - mr < currentPos.y() else screenSize.y())
-
+            #random a destine position with random.randint(a,b). a and b equals to either 0 or maxscreen (width/height  - half of the desktop pet size) if out of screen. (that's some long ass code!)
+            xDestiny = random.randint(currentPos.x() - mr if currentPos.x() > mr else 0, currentPos.x() + mr if screenSize.width() - mr < currentPos.x() else screenSize.width()-self.mainWindow.size().width())
+            yDestiny = random.randint(currentPos.y() - mr if currentPos.y() > mr else 0, currentPos.y() + mr if screenSize.height() - mr < currentPos.y() else screenSize.height()-self.mainWindow.size().height())
             #calculates the difference between current position and destiny. For the sake of memory, I'll reuse variables. This step converts the absolute position on a screen to a relative position to the current position.
             #This is esscentially a substraction of two R2 vectors.
             xDestiny = xDestiny - currentPos.x()
@@ -167,9 +177,11 @@ class DesktopPet(QWidget):
             self.changeFacingDirectionSignal.emit(1 if xDestiny <0 else 0)
 
             #apply the change. 
+            x = self.mainWindow.pos().x()
+            y = self.mainWindow.pos().y()
             for i in range(gcf):
                 # send back the coordinate in a list with vector
-                self.moveSignal.emit([self.mainWindow.pos().x() + delatX, self.mainWindow.pos().y() + delatY])
+                self.moveSignal.emit([x + delatX*i, y + delatY*i])
                 #30 fps
                 time.sleep(1/30)
 
@@ -182,6 +194,98 @@ class DesktopPet(QWidget):
                 a, b = b, a%b
             return a
 
+    
+    def _speechBubbling(self):
+        #Create an instance of speech bubble and set the text it displays
+        self._speechBubble = self._SpeechBubbleClass()
+        self._speechBubble.setText("Iron within, iron without!!!!!!!!!!! ")
+        #Create a thread for speechbubble
+        self._speechBubbleThread = QThread()
+        self._speechBubbleWork = self._SpeechBubbleWork(self, self._speechBubble, 10)
+        #move to thread
+        self._speechBubbleWork.moveToThread(self._speechBubbleThread)
+        #connect the start of thread to speechBubbleWork's run function
+        self._speechBubbleThread.started.connect(self._speechBubbleWork.run)
+        self._speechBubbleThread.finished.connect(self._speechBubbleThread.deleteLater)
+        self._speechBubbleWork.finished.connect(self._speechBubbleThread.quit)
+        self._speechBubbleWork.finished.connect(self._speechBubbleWork.deleteLater)
+        self._speechBubbleWork.finished.connect(self._speechBubble.deleteLater)
+        self._speechBubbleWork.move.connect(lambda coor: self._speechBubble.move(coor[0], coor[1]))
+
+        self._speechBubbleThread.start()
+
+
+
+    #Speech bubble functions
+    #Speech bubble is displayed above Desktop pet for a certain period of time when triggered.
+    #Define a class for SpeechBubble for abstraction/code encapsulation
+    class _SpeechBubbleClass(QMainWindow):
+        def __init__(self):
+            super().__init__()
+            #basic settings
+            self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
+            self.setAutoFillBackground(False)
+            self.setAttribute(Qt.WA_TranslucentBackground, True)
+            #Text display
+            self._textBox = QLabel(self)
+            self._textBox.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+            self._textBox.setMargin(20)
+            self._textBox.setStyleSheet("border-style: groove; border-width: 5px; border-radius: 20px;background-color: rgba(255, 255, 255, 150); font-size: 30px; color: rgb(0,0,0)")
+            #Put Qlabel into the speech bubble
+            self.setCentralWidget(self._textBox)
+            self.show()
+
+            #Set text for the label
+        def setText(self, a0: str | None) -> None:
+            self._textBox.setText(a0)
+            #adjust the size of the Mainwindow after QLabel expanded by text
+            self.adjustSize()
+        
+        def width(self):
+            return self._textBox.size().width()
+        
+        def height(self):
+            return self._textBox.size().height()
+
+    #Create the thread that's going to carry out the movement of the speech bubble
+    class _SpeechBubbleWork(QObject):
+        finished = pyqtSignal() 
+        #This signal returns the coor speech bubble moves to
+        move = pyqtSignal(list) 
+
+        def __init__(self, mw, sb, T2T):
+            super().__init__()
+            #Desktop pet
+            self.mainWindow = mw
+            #the speech bubble
+            self.speechBubble = sb
+            #the display period of speech bubble
+            self.time2Live = T2T
+            
+        def run(self):
+            #Get the size of the screen
+            screenWidth = QDesktopWidget().screenGeometry(0).width()
+            selfWidth = self.speechBubble.width()
+            selfHight = self.speechBubble.height()
+            print(selfWidth, selfHight, self.speechBubble.size())
+            for i in range( self.time2Live*30 ):
+                mainPos = self.mainWindow.pos()
+                mainWidth = self.mainWindow.size().width()
+                mainHeight = self.mainWindow.size().height()
+                xPos = mainPos.x() + mainWidth//2 - selfWidth//2
+                yPos = mainPos.y() - selfHight
+
+                #prevent the speech bubble from going off screen
+                if xPos < 0: xPos = 0
+                elif xPos+selfWidth>screenWidth: xPos = screenWidth - selfWidth
+                #If the space above desktop isn't enought, move the speech bubble down
+                if yPos < 0: yPos = mainPos.y() + mainHeight + selfHight//2
+
+                self.move.emit([xPos, yPos])
+                #FPS
+                time.sleep(1/30)
+            self.finished.emit()
+    
 #-Mouse Interaction--------------------------------------------------------------------------------------
 
     def mousePressEvent(self, event):
@@ -196,6 +300,7 @@ class DesktopPet(QWidget):
             self._previous_drag_pos = event.globalPos()
         else:
             self._draging = False
+            self._speechBubbling()
 
 
         event.accept()
@@ -251,16 +356,27 @@ class DesktopPet(QWidget):
             self._changeFacingDirection(1 if facingDirection == 1 else 0)
         #update previous drag pos
         self._previous_drag_pos = eventPos
-        self.move(eventPos-self._drag_pos)
+        destination = eventPos-self._drag_pos
+        xPos = destination.x()
+        yPos = destination.y()
+        if xPos < 0: xPos = 0
+        elif xPos > self.WINDOWWIDTH - self.width(): xPos = self.WINDOWWIDTH - self.width()
+
+        if yPos < 0: yPos = 0
+        elif yPos > self.WINDOWHEIGHT - self.height(): yPos = self.WINDOWHEIGHT - self.height()
+
+        self.move(xPos, yPos)
 
     #Standby phase is when there isn't any user interaction with desktop pet. 
     #During standby phase, QTimers will kick for standby behaviors and speech bubbles, but they might leads to undertermined behavior if executed during user interactions. So, they have to paused.
     def _quitStandbyPhase(self):
         self._wanderingTimer.stop()
+        self._speechBubbleTimer.stop()
 
     #resume standby phase
     def _beginStandbyPhase(self):
         self._wanderingTimer.start()
+        self._speechBubbleTimer.start()
 
     #change facing direction
     def _changeFacingDirection(self, facingDirection):
