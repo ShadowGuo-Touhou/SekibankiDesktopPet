@@ -1,0 +1,6 @@
+# Dialogs lines are split by backtick, the symbol on tje key to the right of 1.
+# Sentences starting with '#' will be neglected by Desktop Pet. Oh, and don't put backtick and the end of the last dialog!
+Go back to work, NOW.
+Iron within iron without.
+Don't forget about your exam.
+You haven't completed my code yet, just saying. DON'T FORGET ABOUT IT!

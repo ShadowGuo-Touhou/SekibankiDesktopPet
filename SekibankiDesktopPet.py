@@ -19,6 +19,8 @@ class DesktopPet(QWidget):
         self._initTrayIcon()
         #initialize the standby actions
         self._initStandBy()
+        #initialize dialog functions
+        self._initDialog()
 
 #Initialization------------------------------------------------------------------------------------------
         
@@ -68,6 +70,42 @@ class DesktopPet(QWidget):
         self._tray_menu.setContextMenu(self._tray_icon_menu)
         self._tray_menu.show()
 
+    
+    def _initDialog(self):
+        #load dialog file in a list
+        self._standByDialogs = []
+        #Open local file
+        try:
+            with open("dialogs/standByDialogs.txt") as f:
+                self._standByDialogs = f.read().split("\n")
+                length = len(self._standByDialogs)
+                i = 0
+                while i < length:
+                    if self._standByDialogs[i][0] == '#':
+                        self._standByDialogs.remove(self._standByDialogs[i])
+                        i -= 1
+                        length -= 1
+                    i += 1
+        except Exception as e:
+            print(e)
+            self._standByDialogs.append("dialogs/standByDialogs.txt doesn't exist or corrupted.")
+        #Click dialog
+        self._clickDialogs = []
+        try:
+            with open("dialogs/clickDialogs.txt") as f:
+                self._clickDialogs = f.read().split("\n")
+                length = len(self._clickDialogs)
+                i = 0
+                while i < length:
+                    if self._clickDialogs[i][0] == '#':
+                        self._clickDialogs.remove(self._clickDialogs[i])
+                        i -= 1
+                        length -= 1
+                    i += 1
+        except Exception as e:
+            print(e)
+            self._clickDialogs.append("dialogs/clickDialogs.txt doesn't exist or corrupted.")
+
 
 
 #Pet ImageDisplay----------------------------------------------------------------------------------------
@@ -98,19 +136,19 @@ class DesktopPet(QWidget):
         #once the timer time out, trigger _wandering function
         self._wanderingTimer.timeout.connect(self._wandering)
         #set the interval for 
-        self._wanderingTimer.setInterval(random.randint(10, 30)*1000)
+        self._wanderingTimer.setInterval(random.randint(20, 300)*1000)
         self._wanderingTimer.start()
         
         #Create a timer for standby phase, the logic is the same with wandering timer
         self._speechBubbleTimer = QTimer(self)
         self._speechBubbleTimer.timeout.connect(self._speechBubbling)
-        self._speechBubbleTimer.setInterval(random.randint(20, 120)*1000) # 20 ~ 120 seconds
+        self._speechBubbleTimer.setInterval(random.randint(20, 300)*1000) # 20 ~ 120 seconds
         self._speechBubbleTimer.start()
 
     #the function for wandering, becauses it involves a loop that can't be put in the main loop, we need another thread for it
     def _wandering(self):
         #create a thread to run subprocess
-        self._wanderingThread = QThread()
+        self._wanderingThread = QThread(parent=self)
         #create the wandering class and pass in self(DesktopPet)
         self._wanderingWork = self._WanderingWork(self)
         #Add wandering class to thread to be run
@@ -195,13 +233,16 @@ class DesktopPet(QWidget):
             return a
 
     
-    def _speechBubbling(self):
+    def _speechBubbling(self, text = None, T2T = 5):
         #Create an instance of speech bubble and set the text it displays
         self._speechBubble = self._SpeechBubbleClass()
-        self._speechBubble.setText("Iron within, iron without!!!!!!!!!!! ")
+        if text != None:
+            self._speechBubble.setText(text)
+        else:
+            self._speechBubble.setText(random.choice(self._standByDialogs))
         #Create a thread for speechbubble
-        self._speechBubbleThread = QThread()
-        self._speechBubbleWork = self._SpeechBubbleWork(self, self._speechBubble, 10)
+        self._speechBubbleThread = QThread(parent=self)
+        self._speechBubbleWork = self._SpeechBubbleWork(self, self._speechBubble, T2T)
         #move to thread
         self._speechBubbleWork.moveToThread(self._speechBubbleThread)
         #connect the start of thread to speechBubbleWork's run function
@@ -213,7 +254,7 @@ class DesktopPet(QWidget):
         self._speechBubbleWork.move.connect(lambda coor: self._speechBubble.move(coor[0], coor[1]))
 
         self._speechBubbleThread.start()
-
+        self._speechBubble.show()
 
 
     #Speech bubble functions
@@ -226,14 +267,16 @@ class DesktopPet(QWidget):
             self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
             self.setAutoFillBackground(False)
             self.setAttribute(Qt.WA_TranslucentBackground, True)
+            self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             #Text display
             self._textBox = QLabel(self)
             self._textBox.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
             self._textBox.setMargin(20)
             self._textBox.setStyleSheet("border-style: groove; border-width: 5px; border-radius: 20px;background-color: rgba(255, 255, 255, 150); font-size: 30px; color: rgb(0,0,0)")
+            font = QFont('Saitamaar.ttf',20)
+            self._textBox.setFont(font)
             #Put Qlabel into the speech bubble
             self.setCentralWidget(self._textBox)
-            self.show()
 
             #Set text for the label
         def setText(self, a0: str | None) -> None:
@@ -267,8 +310,7 @@ class DesktopPet(QWidget):
             screenWidth = QDesktopWidget().screenGeometry(0).width()
             selfWidth = self.speechBubble.width()
             selfHight = self.speechBubble.height()
-            print(selfWidth, selfHight, self.speechBubble.size())
-            for i in range( self.time2Live*30 ):
+            for i in range( int(self.time2Live*30) ):
                 mainPos = self.mainWindow.pos()
                 mainWidth = self.mainWindow.size().width()
                 mainHeight = self.mainWindow.size().height()
@@ -300,7 +342,9 @@ class DesktopPet(QWidget):
             self._previous_drag_pos = event.globalPos()
         else:
             self._draging = False
-            self._speechBubbling()
+        
+        #Trigger click dialog for 20% chance
+        if random.randint(1, 100)<=20: self._speechBubbling(random.choice(self._clickDialogs), 0.5)
 
 
         event.accept()

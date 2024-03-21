@@ -1,0 +1,5 @@
+# Dialogs lines are split by backtick, the symbol on tje key to the right of 1.
+# Sentences starting with '#' will be neglected by Desktop Pet. Oh, and don't put backtick and the end of the last dialog!
+Hey!
+Don't touch me!
+No dragging!
