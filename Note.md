@@ -17,3 +17,8 @@ The first version - 2024/3/12: added the basic display of desktop pet image and 
 
 2024/3/21
     Enabled Desktop Pet to read from local files for dialogue, and also by accident solved "QThread: Destroyed while thread is still running" error. All I really needed to do is to pass in the desktop pet as the parent for QThread initializations. WHy didn't I thought about it before?
+
+    For my Calendar part of the program, I surprising found that PyQt5 has a calendar class it self called QCalendarWidget. Here are some examples for it: 
+    GKG = https://www.geeksforgeeks.org/pyqt5-qcalendarwidget/
+
+    Before proceeding to the next goal, I added resize smaller/bigger functions to Desktop Pet, this is probably the last function about the pet itself before I complete the calendar sections of it.

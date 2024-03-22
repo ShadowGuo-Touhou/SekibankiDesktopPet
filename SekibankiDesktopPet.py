@@ -38,14 +38,20 @@ class DesktopPet(QWidget):
         #refresh window
         self.update()
 
+        #List of conditions and pre-defined variables
         #the facing state of pet: 0 is facing right, 1 is facing left
         self.__facingDirection = None
         #The array containing the states for desktopPet
         self.normalStates = ["normalState/Sekibanki1 right.gif", "normalState/Sekibanki1 left.gif"]
-        
+        #Condition to see if the pet is talking
+        self._speechBubbleCondition = False
+        #The scale of gif
+        self._petImageSize = 1
         #Constants
         self.WINDOWWIDTH = QApplication.primaryScreen().size().width()
         self.WINDOWHEIGHT = QApplication.primaryScreen().size().height()
+        self.ORGINALWIDTH = 421
+        self.ORGINALHEIGHT = 372
         
 
 
@@ -64,8 +70,13 @@ class DesktopPet(QWidget):
         #create a display or hide the pet
         display_action = QAction("Display/Hide", self, triggered=self.display)
         #Add two events to the menu
-        self._tray_icon_menu.addAction(quit_action)
+        bigger_action = QAction("Bigger?", self, triggered = self._increaseSize)
+        smaller_action = QAction("Smaller?", self, triggered=self._decreaseSize)
+        
         self._tray_icon_menu.addAction(display_action)
+        self._tray_icon_menu.addAction(bigger_action)
+        self._tray_icon_menu.addAction(smaller_action)
+        self._tray_icon_menu.addAction(quit_action)
 
         self._tray_menu.setContextMenu(self._tray_icon_menu)
         self._tray_menu.show()
@@ -117,9 +128,6 @@ class DesktopPet(QWidget):
         #randomly choose a starting facing direction for pet
         self._changeFacingDirection(random.randint(0,1))
 
-        # #Resize window according to the loaded imagese
-        self.resize(421, 372)
-        
         #go to a random position on the desktop
         randomPos = self._randomPos()
         self.move(randomPos[0], randomPos[1])
@@ -247,10 +255,12 @@ class DesktopPet(QWidget):
         self._speechBubbleWork.moveToThread(self._speechBubbleThread)
         #connect the start of thread to speechBubbleWork's run function
         self._speechBubbleThread.started.connect(self._speechBubbleWork.run)
+        self._speechBubbleThread.started.connect(self._speechBubbleConditionChange)
         self._speechBubbleThread.finished.connect(self._speechBubbleThread.deleteLater)
         self._speechBubbleWork.finished.connect(self._speechBubbleThread.quit)
         self._speechBubbleWork.finished.connect(self._speechBubbleWork.deleteLater)
         self._speechBubbleWork.finished.connect(self._speechBubble.deleteLater)
+        self._speechBubbleWork.finished.connect(self._speechBubbleConditionChange)
         self._speechBubbleWork.move.connect(lambda coor: self._speechBubble.move(coor[0], coor[1]))
 
         self._speechBubbleThread.start()
@@ -328,6 +338,9 @@ class DesktopPet(QWidget):
                 time.sleep(1/30)
             self.finished.emit()
     
+    def _speechBubbleConditionChange(self):
+        self._speechBubbleCondition = not self._speechBubbleCondition 
+    
 #-Mouse Interaction--------------------------------------------------------------------------------------
 
     def mousePressEvent(self, event):
@@ -343,8 +356,10 @@ class DesktopPet(QWidget):
         else:
             self._draging = False
         
-        #Trigger click dialog for 20% chance
-        if random.randint(1, 100)<=20: self._speechBubbling(random.choice(self._clickDialogs), 0.5)
+        #Trigger click dialog for 50% chance
+        if self._speechBubbleCondition == 0:
+            if random.randint(0, 1): 
+                self._speechBubbling(random.choice(self._clickDialogs), 0.5)
 
 
         event.accept()
@@ -376,16 +391,12 @@ class DesktopPet(QWidget):
 
     #Display or hide the desktop pet depending on the current state
     def display(self):
-        if int(self.windowOpacity()) == 0:
-            self.setWindowOpacity(1)
-        else: 
-            self.setWindowOpacity(0)
+            self.setWindowOpacity(not self.windowOpacity())
 
     #Choose a random point on the screen where desktop pet won't go off screen
     def _randomPos(self) -> int:
-        screenSize = QDesktopWidget().screenGeometry(0)
         petSize = self.size()
-        return random.randint(0, screenSize.width()-petSize.width()//2), random.randint(0, screenSize.height()-petSize.height()//2)
+        return random.randint(0, self.WINDOWWIDTH-petSize.width()), random.randint(0, self.WINDOWWIDTH-petSize.height())
     
     #This function decides the type of movement desktoppet is experiencing.
     def _petDragMovement(self, eventPos:int, ) -> None:
@@ -393,11 +404,11 @@ class DesktopPet(QWidget):
         facingDirection = self._previous_drag_pos.x() - eventPos.x()
         if facingDirection <0: facingDirection = 1
         elif facingDirection >0: facingDirection = 0
-        
+
         if self._facingDirection == facingDirection:
             pass
         else:
-            self._changeFacingDirection(1 if facingDirection == 1 else 0)
+            self._changeFacingDirection(facingDirection)
         #update previous drag pos
         self._previous_drag_pos = eventPos
         destination = eventPos-self._drag_pos
@@ -431,7 +442,30 @@ class DesktopPet(QWidget):
         #load petImage into petLabel
         self.petLabel.setMovie(self.petImage)
         #begin to play the gif
+        self._resize()
         self.petImage.start()
+
+
+    def _resize(self):
+        newWidth = int(self.ORGINALWIDTH*self._petImageSize)
+        newHeight = int(self.ORGINALHEIGHT*self._petImageSize)
+        self.petImage.setScaledSize(QSize(newWidth, newHeight))
+        self.resize(newWidth, newHeight)
+        self.petLabel.resize(newWidth, newHeight)
+        # self.update()
+        
+        
+
+    #Increase the size of Desktop pet
+    def _increaseSize(self):
+        self._petImageSize += 0.1
+        self._resize()
+        
+
+
+    def _decreaseSize(self):
+        self._petImageSize -= 0.1
+        self._resize()
         
         
 
