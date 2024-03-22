@@ -22,3 +22,8 @@ The first version - 2024/3/12: added the basic display of desktop pet image and 
     GKG = https://www.geeksforgeeks.org/pyqt5-qcalendarwidget/
 
     Before proceeding to the next goal, I added resize smaller/bigger functions to Desktop Pet, this is probably the last function about the pet itself before I complete the calendar sections of it.
+
+2024/3/22
+    Made speech bubbles dynamically adjusts to the size of Desktop Pet.
+    Add utf-8 encoding to file reading
+    Fixed the possibility of crashing due to speech bubbles (probably)
