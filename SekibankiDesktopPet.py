@@ -21,6 +21,8 @@ class DesktopPet(QWidget):
         self._initStandBy()
         #initialize dialog functions
         self._initDialog()
+        #Display self (this is different from opacity)
+        self.show()
 
 #Initialization------------------------------------------------------------------------------------------
         
@@ -72,10 +74,12 @@ class DesktopPet(QWidget):
         #Add two events to the menu
         bigger_action = QAction("Bigger?", self, triggered = self._increaseSize)
         smaller_action = QAction("Smaller?", self, triggered=self._decreaseSize)
+        teleport = QAction("Teleport!", self, triggered=self._teleport)
         
         self._tray_icon_menu.addAction(display_action)
         self._tray_icon_menu.addAction(bigger_action)
         self._tray_icon_menu.addAction(smaller_action)
+        # self._tray_icon_menu.addAction(teleport)
         self._tray_icon_menu.addAction(quit_action)
 
         self._tray_menu.setContextMenu(self._tray_icon_menu)
@@ -130,10 +134,10 @@ class DesktopPet(QWidget):
 
         #go to a random position on the desktop
         randomPos = self._randomPos()
+        print(randomPos)
         self.move(randomPos[0], randomPos[1])
         
-        #Display self (this is different from opacity)
-        self.show()
+
 
 
 #Pet Standby Actions-------------------------------------------------------------------------------------
@@ -158,7 +162,7 @@ class DesktopPet(QWidget):
         #create a thread to run subprocess
         self._wanderingThread = QThread(parent=self)
         #create the wandering class and pass in self(DesktopPet)
-        self._wanderingWork = self._WanderingWork(self)
+        self._wanderingWork = self._WanderingWork(self, 300*self._petImageSize)
         #Add wandering class to thread to be run
         self._wanderingWork.moveToThread(self._wanderingThread)
         #Connect run signal of wandering thread to the start of run function
@@ -186,21 +190,21 @@ class DesktopPet(QWidget):
         moveSignal = pyqtSignal(list)
         changeFacingDirectionSignal = pyqtSignal(int)
 
-        def __init__(self, mw):
+        def __init__(self, mw, mr = 300):
             #initialize super class
             super().__init__()
             #pass in the DesktopPet class so we can call on its move function
             self.mainWindow = mw
+            self.mr = int(mr)
 
         def run(self):
-            #The range of movement distance is movementrange "MR" pixel to both side
+            #The range of movement distance is movementrange "mr" pixel to both side
             #Get the current position
             currentPos = self.mainWindow.pos()
             screenSize = QApplication.primaryScreen().size()
-            mr = 300
             #random a destine position with random.randint(a,b). a and b equals to either 0 or maxscreen (width/height  - half of the desktop pet size) if out of screen. (that's some long ass code!)
-            xDestiny = random.randint(currentPos.x() - mr if currentPos.x() > mr else 0, currentPos.x() + mr if screenSize.width() - mr < currentPos.x() else screenSize.width()-self.mainWindow.size().width())
-            yDestiny = random.randint(currentPos.y() - mr if currentPos.y() > mr else 0, currentPos.y() + mr if screenSize.height() - mr < currentPos.y() else screenSize.height()-self.mainWindow.size().height())
+            xDestiny = random.randint(currentPos.x() - self.mr if currentPos.x() > self.mr else 0, currentPos.x() + self.mr if screenSize.width() - self.mr < currentPos.x() else screenSize.width()-self.mainWindow.size().width())
+            yDestiny = random.randint(currentPos.y() - self.mr if currentPos.y() > self.mr else 0, currentPos.y() + self.mr if screenSize.height() - self.mr < currentPos.y() else screenSize.height()-self.mainWindow.size().height())
             #calculates the difference between current position and destiny. For the sake of memory, I'll reuse variables. This step converts the absolute position on a screen to a relative position to the current position.
             #This is esscentially a substraction of two R2 vectors.
             xDestiny = xDestiny - currentPos.x()
@@ -396,7 +400,7 @@ class DesktopPet(QWidget):
     #Choose a random point on the screen where desktop pet won't go off screen
     def _randomPos(self) -> int:
         petSize = self.size()
-        return random.randint(0, self.WINDOWWIDTH-petSize.width()), random.randint(0, self.WINDOWWIDTH-petSize.height())
+        return random.randint(0, self.WINDOWWIDTH-petSize.width()), random.randint(0, self.WINDOWHEIGHT-petSize.height())
     
     #This function decides the type of movement desktoppet is experiencing.
     def _petDragMovement(self, eventPos:int, ) -> None:
@@ -441,31 +445,43 @@ class DesktopPet(QWidget):
         self.petImage = QMovie(self.normalStates[self._facingDirection])
         #load petImage into petLabel
         self.petLabel.setMovie(self.petImage)
-        #begin to play the gif
+        #call resize to rescale gif if apply
         self._resize()
+        #begin to play the gif
         self.petImage.start()
 
 
     def _resize(self):
+        #get the width&height after resize
         newWidth = int(self.ORGINALWIDTH*self._petImageSize)
         newHeight = int(self.ORGINALHEIGHT*self._petImageSize)
+        #rescale petImage with it.
         self.petImage.setScaledSize(QSize(newWidth, newHeight))
+        #Resize the window and the label holding gif
         self.resize(newWidth, newHeight)
         self.petLabel.resize(newWidth, newHeight)
-        # self.update()
         
         
 
     #Increase the size of Desktop pet
     def _increaseSize(self):
-        self._petImageSize += 0.1
-        self._resize()
+        #increase the size scaler by 0.1
+        if self._petImageSize <= 2:
+            self._petImageSize += 0.1
+            self._resize()
         
 
-
+    #Decrease the size of Desktop pet
     def _decreaseSize(self):
-        self._petImageSize -= 0.1
-        self._resize()
+        #decrease the size scaler by 0.1
+        if self._petImageSize >= 0.3:
+            self._petImageSize -= 0.1
+            self._resize()
+
+    def _teleport(self):
+        l = self._randomPos()
+        print(l)
+        self.move(l[0], l[1])
         
         
 
