@@ -102,8 +102,7 @@ class DesktopPet(QWidget):
                         length -= 1
                     i += 1
         except Exception as e:
-            print(e)
-            self._standByDialogs.append("dialogs/standByDialogs.txt doesn't exist or corrupted.")
+            self._standByDialogs.append(e)
         #Click dialog
         self._clickDialogs = []
         try:
@@ -118,8 +117,7 @@ class DesktopPet(QWidget):
                         length -= 1
                     i += 1
         except Exception as e:
-            print(e)
-            self._clickDialogs.append("dialogs/clickDialogs.txt doesn't exist or corrupted.")
+            self._clickDialogs.append(e)
 
 
 
@@ -134,7 +132,6 @@ class DesktopPet(QWidget):
 
         #go to a random position on the desktop
         randomPos = self._randomPos()
-        print(randomPos)
         self.move(randomPos[0], randomPos[1])
         
 
@@ -150,7 +147,7 @@ class DesktopPet(QWidget):
         #set the interval for 
         self._wanderingTimer.setInterval(random.randint(20, 300)*1000)
         self._wanderingTimer.start()
-        
+
         #Create a timer for standby phase, the logic is the same with wandering timer
         self._speechBubbleTimer = QTimer(self)
         self._speechBubbleTimer.timeout.connect(self._speechBubbling)
@@ -162,7 +159,7 @@ class DesktopPet(QWidget):
         #create a thread to run subprocess
         self._wanderingThread = QThread(parent=self)
         #create the wandering class and pass in self(DesktopPet)
-        self._wanderingWork = self._WanderingWork(self, 300*self._petImageSize)
+        self._wanderingWork = self._WanderingWork(self, 300*(self._petImageSize*2-1))
         #Add wandering class to thread to be run
         self._wanderingWork.moveToThread(self._wanderingThread)
         #Connect run signal of wandering thread to the start of run function
@@ -203,8 +200,8 @@ class DesktopPet(QWidget):
             currentPos = self.mainWindow.pos()
             screenSize = QApplication.primaryScreen().size()
             #random a destine position with random.randint(a,b). a and b equals to either 0 or maxscreen (width/height  - half of the desktop pet size) if out of screen. (that's some long ass code!)
-            xDestiny = random.randint(currentPos.x() - self.mr if currentPos.x() > self.mr else 0, currentPos.x() + self.mr if screenSize.width() - self.mr < currentPos.x() else screenSize.width()-self.mainWindow.size().width())
-            yDestiny = random.randint(currentPos.y() - self.mr if currentPos.y() > self.mr else 0, currentPos.y() + self.mr if screenSize.height() - self.mr < currentPos.y() else screenSize.height()-self.mainWindow.size().height())
+            xDestiny = random.randint(currentPos.x() - self.mr if currentPos.x() > self.mr else 0, currentPos.x() + self.mr if screenSize.width() - self.mr > currentPos.x() else screenSize.width()-self.mainWindow.size().width())
+            yDestiny = random.randint(currentPos.y() - self.mr if currentPos.y() > self.mr else 0, currentPos.y() + self.mr if screenSize.height() - self.mr > currentPos.y() else screenSize.height()-self.mainWindow.size().height())
             #calculates the difference between current position and destiny. For the sake of memory, I'll reuse variables. This step converts the absolute position on a screen to a relative position to the current position.
             #This is esscentially a substraction of two R2 vectors.
             xDestiny = xDestiny - currentPos.x()
@@ -348,7 +345,6 @@ class DesktopPet(QWidget):
             self.finished.emit()
     
     def _speechBubbleConditionChange(self):
-        print(self._speechBubbleCondition)
         self._speechBubbleCondition = not self._speechBubbleCondition 
     
 #-Mouse Interaction--------------------------------------------------------------------------------------
@@ -484,7 +480,6 @@ class DesktopPet(QWidget):
 
     def _teleport(self):
         l = self._randomPos()
-        print(l)
         self.move(l[0], l[1])
         
         
@@ -492,5 +487,15 @@ class DesktopPet(QWidget):
 if __name__ == '__main__':
     #initialize
     app = QApplication(sys.argv)
+    #Produce an error log on tailed starts
+    # try:
+    #     pet = DesktopPet()
+    # except Exception as e:
+    #     crash=["Error on line {}".format(sys.exc_info()[-1].tb_lineno),"\n",e]
+    #     timeX=str(time.time())
+    #     with open("ErrorLog"+timeX+".txt","w+") as crashLog:
+    #         for i in crash:
+    #             i=str(i)
+    #             crashLog.write(i)
     pet = DesktopPet()
     sys.exit(app.exec_())
