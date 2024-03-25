@@ -200,8 +200,8 @@ class DesktopPet(QWidget):
             currentPos = self.mainWindow.pos()
             screenSize = QApplication.primaryScreen().size()
             #random a destine position with random.randint(a,b). a and b equals to either 0 or maxscreen (width/height  - half of the desktop pet size) if out of screen. (that's some long ass code!)
-            xDestiny = random.randint(currentPos.x() - self.mr if currentPos.x() > self.mr else 0, currentPos.x() + self.mr if screenSize.width() - self.mr > currentPos.x() else screenSize.width()-self.mainWindow.size().width())
-            yDestiny = random.randint(currentPos.y() - self.mr if currentPos.y() > self.mr else 0, currentPos.y() + self.mr if screenSize.height() - self.mr > currentPos.y() else screenSize.height()-self.mainWindow.size().height())
+            xDestiny = random.randint(currentPos.x() - self.mr if currentPos.x() > self.mr else 0, currentPos.x() + self.mr if screenSize.width() > currentPos.x() + self.mr + self.mainWindow.size().width() else screenSize.width()-self.mainWindow.size().width())
+            yDestiny = random.randint(currentPos.y() - self.mr if currentPos.y() > self.mr else 0, currentPos.y() + self.mr if screenSize.height()> currentPos.y() + self.mr + self.mainWindow.size().height() else screenSize.height()-self.mainWindow.size().height())
             #calculates the difference between current position and destiny. For the sake of memory, I'll reuse variables. This step converts the absolute position on a screen to a relative position to the current position.
             #This is esscentially a substraction of two R2 vectors.
             xDestiny = xDestiny - currentPos.x()
