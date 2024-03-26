@@ -59,7 +59,7 @@ class DesktopPet(QWidget):
 
     def _initTrayIcon(self):
         #import prepared trayicon image
-        iconImage = os.path.join('icon.ico')
+        iconImage = os.path.join('assets/icon.ico')
         #Create the tray icon
         self._tray_menu = QSystemTrayIcon(self)
         #set the icon image
@@ -242,9 +242,9 @@ class DesktopPet(QWidget):
             return a
 
     
-    def _speechBubbling(self, text = None, T2T = 5):
+    def _speechBubbling(self, text = None, T2T = 5, priority = 0):
         #Don't creat new window if there is one already
-        if self._speechBubbleCondition == True:
+        if self._speechBubbleCondition == True and priority == 0:
             return
         #Create an instance of speech bubble and set the text it displays
         self._speechBubble = self._SpeechBubbleClass(self._petImageSize)
@@ -396,6 +396,10 @@ class DesktopPet(QWidget):
     #Display or hide the desktop pet depending on the current state
     def display(self):
             self.setWindowOpacity(not self.windowOpacity())
+            if self.windowOpacity == 0:
+                self._quitStandbyPhase()
+            else:
+                self._beginStandbyPhase()
 
     #Choose a random point on the screen where desktop pet won't go off screen
     def _randomPos(self) -> int:
