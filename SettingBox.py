@@ -110,9 +110,19 @@ class SettingMenu(QWidget):
         movementIntervalLayout.addSpacing(15)
         settingPageLayout.addLayout(movementIntervalLayout)
 
+        #Add a stretch to the layout for spacing
+        settingPageLayout.addStretch(1)
         #add save setting button
+        confirmLayout = QHBoxLayout()
+        confirmLayout.addStretch(0)
+        confirmButton = QPushButton()
+        confirmButton.setObjectName("confimButton")
+        confirmLayout.addWidget(confirmButton)
+        confirmButton.setFixedSize(90,60)
+        #add button to the setting page
+        settingPageLayout.addLayout(confirmLayout)
 
-        settingPageLayout.addStretch(0)
+
         self.stackLayout.setCurrentIndex(0)
 
         
@@ -154,6 +164,7 @@ class SettingMenu(QWidget):
         #Frame color scheme
         frameBorderColor = 'black'
         frameBackgroundColor = 'white'
+
         #Exit button color scheme
         exitButtonBorderColor = 'black'
         exitButtonBackgroundColor = 'white'
@@ -223,7 +234,6 @@ class SettingMenu(QWidget):
                     border-radius: 10px;
                     background-color: {buttonBackgroundColor};
                     image: url(assets/UI/Speech_Bubble_Unselected.png);
-                    border-color: {buttonUnselectedColor};
                 }}
                 QPushButton#speechSettingButtonUnselected:hover{{
                     border-color: {buttonSelectedColor};
@@ -244,6 +254,21 @@ class SettingMenu(QWidget):
                 QPushButton#speechSettingButtonSelected:pressed{{
                     background-color: {buttonSelectedColor};
                     image: url(assets/UI/Speech_Bubble_Selected.png);
+                }}
+
+                QPushButton#confimButton{{
+                    border: 5px solid {buttonUnselectedColor};
+                    border-radius: 30px;
+                    background-color: {buttonBackgroundColor};
+                    image: url(assets/UI/Checkmark_Unselected.png);
+                }}
+                QPushButton#confimButton:hover{{
+                    border-color: {buttonSelectedColor};
+                    image: url(assets/UI/Checkmark_Unselected.png)
+                }}
+                QPushButton#confimButton:pressed{{
+                    border-color: {buttonSelectedColor};
+                    image: url(assets/UI/Checkmark_Selected.png)
                 }}
         """)        
 
