@@ -4,13 +4,15 @@ from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtGui import QPainter
 from PyQt5.QtWidgets import *
-
+from SettingBox import SettingMenu
 #Inspired by: https://zhuanlan.zhihu.com/p/521580516
 
 class DesktopPet(QWidget):
     #initialization process
     def __init__(self, parent=None, **kwargs):
         super().__init__()
+        #initialize setting menu and grab the config list
+        self._initSettingMenu()
         #initialize the window
         self._init()
         #initialize and show pet image
@@ -47,6 +49,7 @@ class DesktopPet(QWidget):
         self.normalStates = ["normalState/Sekibanki1 right.gif", "normalState/Sekibanki1 left.gif"]
         #Condition to see if the pet is talking
         self._speechBubbleCondition = False
+        self._draggable = True
         #The scale of gif
         self._petImageSize = 1
         #Constants
@@ -54,6 +57,8 @@ class DesktopPet(QWidget):
         self.WINDOWHEIGHT = QApplication.primaryScreen().size().height()
         self.ORGINALWIDTH = 421
         self.ORGINALHEIGHT = 372
+        #the configuration
+        self.SETTING = self._settingMenu.getConfig()
         
 
 
@@ -119,6 +124,43 @@ class DesktopPet(QWidget):
         except Exception as e:
             self._clickDialogs.append(e)
 
+#The menu display----------------------------------------------------------------------------------------
+    
+    #initialize settings
+    def _initSettingMenu(self):
+        self._settingMenu = SettingMenu()
+        self._settingMenu.finished.connect(self._SettingMenuClose)
+        self._settingMenu.warning.connect(lambda x: self._speechBubbling(x))
+
+    def _SettingMenuOpen(self):
+        self._quitStandbyPhase()
+        #move the menu
+        self._settingMenuMove()
+        #Show
+        self._settingMenu.show()
+        #forbid user from dragging desktop pet while menu is on
+        self._draggable = False
+    
+    def _SettingMenuClose(self):
+        self._beginStandbyPhase()
+        #reactive dragging after user close menu
+        self._draggable = True
+
+    #Adjust the position when opening the menu
+    def _settingMenuMove(self):
+        currPos = self.pos()
+        selfSize = self.size()
+        menuSize = self._settingMenu.size()
+        #put x to the right of the desktop pet
+        x = currPos.x() + selfSize.width() if self.WINDOWWIDTH - currPos.x() - selfSize.width() > menuSize.width() else currPos.x() - menuSize.width()
+        y = currPos.y() + selfSize.height()//2 - menuSize.height()//2
+        if y + menuSize.height() > self.WINDOWHEIGHT:
+            y = self.WINDOWHEIGHT - menuSize.height()
+            return self._settingMenu.move(x,y)
+        if y < 0: 
+            y = 0
+        self._settingMenu.move(x,y)
+
 
 
 #Pet ImageDisplay----------------------------------------------------------------------------------------
@@ -144,15 +186,16 @@ class DesktopPet(QWidget):
         self._wanderingTimer = QTimer(self)
         #once the timer time out, trigger _wandering function
         self._wanderingTimer.timeout.connect(self._wandering)
-        #set the interval for 
-        self._wanderingTimer.setInterval(random.randint(20, 300)*1000)
-        self._wanderingTimer.start()
+        #start the timer
+        self._wanderIngTimerReset()
 
         #Create a timer for standby phase, the logic is the same with wandering timer
         self._speechBubbleTimer = QTimer(self)
         self._speechBubbleTimer.timeout.connect(self._speechBubbling)
         self._speechBubbleTimer.setInterval(random.randint(20, 300)*1000) # 20 ~ 120 seconds
         self._speechBubbleTimer.start()
+
+        self._standByTimers = [self._wanderingTimer, self._speechBubbleTimer]
 
     #the function for wandering, becauses it involves a loop that can't be put in the main loop, we need another thread for it
     def _wandering(self):
@@ -176,6 +219,9 @@ class DesktopPet(QWidget):
         #Change the facing of pet upon reciving the facing data
         self._wanderingWork.changeFacingDirectionSignal.connect(lambda facing: self._changeFacingDirection(facing))
 
+        #Reset the time interval of wanderingTimer:
+        self._wanderingThread.finished.connect(self._wanderIngTimerReset)
+        
         #Start the thread 
         self._wanderingThread.start()
 
@@ -241,6 +287,8 @@ class DesktopPet(QWidget):
                 a, b = b, a%b
             return a
 
+    def _wanderIngTimerReset(self):
+        self._wanderingTimer.start(random.randint(self.SETTING['start'], self.SETTING['end'])*1000)
     
     def _speechBubbling(self, text = None, T2T = 5, priority = 0):
         #Don't creat new window if there is one already
@@ -354,13 +402,14 @@ class DesktopPet(QWidget):
         self._quitStandbyPhase()
 
         #Enter drag event if mouse pressed is left button
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.LeftButton and self._draggable:
             self._draging = True
             #adjust anchor of movement position
             self._drag_pos = event.globalPos() - self.pos()
             self._previous_drag_pos = event.globalPos()
         else:
             self._draging = False
+            self._SettingMenuOpen()
         #Trigger click dialog for 50% chance
         if random.randint(0, 1): 
             self._speechBubbling(random.choice(self._clickDialogs), 0.5)
@@ -433,13 +482,13 @@ class DesktopPet(QWidget):
     #Standby phase is when there isn't any user interaction with desktop pet. 
     #During standby phase, QTimers will kick for standby behaviors and speech bubbles, but they might leads to undertermined behavior if executed during user interactions. So, they have to paused.
     def _quitStandbyPhase(self):
-        self._wanderingTimer.stop()
-        self._speechBubbleTimer.stop()
+        for Timer in self._standByTimers:
+            Timer.stop()
 
     #resume standby phase
     def _beginStandbyPhase(self):
-        self._wanderingTimer.start()
-        self._speechBubbleTimer.start()
+        for Timer in self._standByTimers:
+            Timer.start()
 
     #change facing direction
     def _changeFacingDirection(self, facingDirection):

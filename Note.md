@@ -32,3 +32,10 @@ The first version - 2024/3/12: added the basic display of desktop pet image and 
     Begining to write the calendar function. I slightly changed my mind though. Rather than writting a calendar that sets a time to notice user about something, I want let user set the notice interval of different groups of dialog.
     I call the gui interface I'm developing now "SettingBox" because it also incorporates the settings of desktop pet. It is in a separate file for now, I'll integrate it into the main file later... maybe not. It's too long to be integerated.
     Oh, I also create a folder for the ui icons and future config files for better appearence.
+
+
+2024/3/26
+    the format for setting log is:
+    ["Movement interval starts", "Movement interval ends", "language"]
+
+    Note: there are alogrithms detecting mouse movement known as hud, which tracts the movement of mouse.
