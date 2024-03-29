@@ -293,7 +293,7 @@ class DesktopPet(QWidget):
         if self._speechBubbleCondition == True and priority == 0:
             return
         #Create an instance of speech bubble and set the text it displays
-        self._speechBubble = self._SpeechBubbleClass(self._petImageSize)
+        self._speechBubble = self._SpeechBubbleClass(self._petImageSize, opacity=self.SETTING['speechBubbleOpacity'])
         if text != None:
             self._speechBubble.setText(text)
         else:
@@ -321,7 +321,7 @@ class DesktopPet(QWidget):
     #Speech bubble is displayed above Desktop pet for a certain period of time when triggered.
     #Define a class for SpeechBubble for abstraction/code encapsulation
     class _SpeechBubbleClass(QMainWindow):
-        def __init__(self, scaler = 1):
+        def __init__(self, scaler = 1, color = 'white', opacity = 1):
             super().__init__()
             #basic settings
             self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
@@ -333,7 +333,10 @@ class DesktopPet(QWidget):
             self._textBox = QLabel(self)
             self._textBox.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
             self._textBox.setMargin(int(20*scaler))
-            self._textBox.setStyleSheet(f"border-style: groove; border-width: {int(5*scaler)}px; border-radius: 20px;background-color: rgba(255, 255, 255, 150); font-size: {int(30*scaler)}px; color: rgb(0,0,0)")
+            color = QColor(color).getRgb()
+            colorModified = (color[0],color[1],color[2], opacity)
+            self._textBox.setStyleSheet(f"border-style: groove; border-width: {int(5*scaler)}px; border-radius: 20px; background-color: rgba{colorModified}; font-size: {int(30*scaler)}px; color: rgb(0,0,0); ")
+
             # font = QFont('Saitamaar.ttf')
             # self._textBox.setFont(font)
             #Put Qlabel into the speech bubble
@@ -408,9 +411,8 @@ class DesktopPet(QWidget):
         else:
             self._draging = False
             self._SettingMenuOpen()
-        #Trigger click dialog for 50% chance
-        if random.randint(0, 1): 
-            self._speechBubbling(random.choice(self._clickDialogs), 0.5)
+
+        self._triggerClickDialog()
 
 
         event.accept()
@@ -430,7 +432,10 @@ class DesktopPet(QWidget):
         self._draging = False
         self.setCursor(QCursor(Qt.ArrowCursor))
 
-
+    #Trigger click dialog
+    def _triggerClickDialog(self):
+        if random.randint(1, 100) < self.SETTING['clickDialogFrequency']:
+            self._speechBubbling(random.choice(self._clickDialogs), 0.5)
 
 
 #Minor Functions-----------------------------------------------------------------------------------------

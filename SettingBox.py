@@ -52,12 +52,12 @@ class SettingMenu(QWidget):
         except Exception as e:
             print(e)
             self.warning.emit(str(e))
-            self.SETTING = {'start':20, 'end':300, 'language': 0}
+            self.SETTING = {'start':20, 'end':300, 'language': 0, "clickDialogFrequency": 50, "speechBubbleOpacity": 0.5}
         #load language, since there ain't really much text, I'll just embed language file in the code.
         if self.SETTING['language'] == 0:
-            self.LANGUAGE = {"moveInterval": "Movement Interval:", "to": "to", "seconds": "seconds.", "language": "language",'dialogInterval': 'Dialog Interval:', "illegalInputWarning": "Not gonna work, check your inputs, dummy.", "successfulSave": "Got it. I'll make the change after restart.", "newBubble":"Enter the name for new dialog group:", 'deleteBubble': "Confirm deleting", "error": "Error encountered:", "time": "Duration:", "color":"Speech bubble color:", 'tooManyClickWarning': "Hey! don't click so many times!\nMy creator didn't handle exceptions properly..."}
+            self.LANGUAGE = {"moveInterval": "Movement Interval:", "to": "to", "seconds": "seconds.", "language": "language",'dialogInterval': 'Dialog Interval:', "illegalInputWarning": "Not gonna work, check your inputs, dummy.", "successfulSave": "Got it. I'll make the change after restart.", "newBubble":"Enter the name for new dialog group:", 'newBubble2': "Enter the content of dialog:", 'deleteBubble': "Confirm deleting", "error": "Error encountered:", "time": "Duration:", "color":"Speech bubble color:", 'tooManyClickWarning': "Hey! don't click so many times!\nMy creator didn't handle exceptions properly...", "clickDialogFrequency":"Click dialog display chance:", "speechBubbleOpacity":"Speechbubble opacity: "}
         else:
-            self.LANGUAGE = {'moveInterval': "移动时间间隔:", 'to': '到', 'seconds': '秒。', 'language': '语言', 'dialogInterval': '对话出现间隔：','illegalInputWarning': '参数错误，检查一下啦，笨蛋。', 'successfulSave': '知道啦，重启时改正~', 'newBubble': '请输入新对话列表的名称：', 'deleteBubble': '确认删除', "error":"遭遇错误：", 'time': "持续时间：", "color":"对话泡颜色：", "tooManyClickWarning": "喂！少点几下哦！\n作者没做Exception Handling啦..."}
+            self.LANGUAGE = {'moveInterval': "移动时间间隔:", 'to': '到', 'seconds': '秒。', 'language': '语言', 'dialogInterval': '对话出现间隔：','illegalInputWarning': '参数错误，检查一下啦，笨蛋。', 'successfulSave': '知道啦，重启时改正~', 'newBubble': '请输入新对话列表的名称：', 'newBubble2': "请输入对话内容：",'deleteBubble': '确认删除', "error":"遭遇错误：", 'time': "持续时间：", "color":"对话泡颜色：", "tooManyClickWarning": "喂！少点几下哦！\n作者没做Exception Handling啦...", "clickDialogFrequency":"点击对话出现概率: ", "speechBubbleOpacity":"对话泡透明度："}
 
             
     def loadDialog(self):
@@ -71,6 +71,8 @@ class SettingMenu(QWidget):
         except Exception as e:
             print(e)
             self.warning.emit(f"{self.LANGUAGE['error']} {e}")
+        if "clickDialog" not in self.DIALOGS:
+            self.DIALOGS['clickDialog'] = {'color':'white', 'start':30, 'end': 200, 'time':5, 'id':'clickDialog', 'dialog':[]}
 
         #create a container for speechbubbles
         speechBubbleContainer = QWidget()
@@ -164,11 +166,11 @@ class SettingMenu(QWidget):
         #Try delete it, or send error
         try:
             os.remove(f"assets/Dialogs/{id}.json")
-            self.speechBubbleReload()
+            
         except Exception as e:
             self.warning.emit(self.LANGUAGE['tooManyClickWarning'])
             print(e)
-
+        self.speechBubbleReload()
         self.deleteBox.close()
 
     def speechBubbleReload(self):
@@ -201,6 +203,7 @@ class SettingMenu(QWidget):
         self.stackLayout.addWidget(settingPage)
         #Create layout for the setting page
         settingPageLayout = QVBoxLayout()
+        settingPageLayout.setContentsMargins(15,0,15, 20)
         settingPage.setLayout(settingPageLayout)
         #add some filler space of optionBar doens't get pushed to the celling
         settingPageLayout.addSpacing(30)
@@ -212,7 +215,6 @@ class SettingMenu(QWidget):
         settingPageLayout.addSpacing(20)
         #add movement interval setting
         movementIntervalLayout = QHBoxLayout()
-        movementIntervalLayout.addSpacing(15)
         movementIntervalLayout.addWidget(QLabel(self.LANGUAGE['moveInterval']))
         movementIntervalLayout.addStretch(0)
 
@@ -234,22 +236,42 @@ class SettingMenu(QWidget):
         movementIntervalLayout.addWidget(QLabel(self.LANGUAGE['to']))
         movementIntervalLayout.addWidget(self.movementIntervalEnd)
         movementIntervalLayout.addWidget(QLabel(self.LANGUAGE['seconds']))
-        movementIntervalLayout.addSpacing(15)
         settingPageLayout.addLayout(movementIntervalLayout)
+
+        #add click dialog frequency
+        clickDialogLayout = QHBoxLayout()
+        clickDialogLayout.addWidget(QLabel(self.LANGUAGE['clickDialogFrequency']))
+        clickDialogLayout.addStretch(0)
+        self.clickDialogFrequency = QLineEdit()
+        self.clickDialogFrequency.setValidator(QRegularExpressionValidator(QRegularExpression("[1-9][0-9][0]")))
+        self.clickDialogFrequency.setText(str(self.SETTING['clickDialogFrequency']))
+        self.clickDialogFrequency.setMaximumWidth(50)
+        clickDialogLayout.addWidget(self.clickDialogFrequency)
+        clickDialogLayout.addWidget(QLabel("%"))
+        settingPageLayout.addLayout(clickDialogLayout)
+
+        #Add speechbubble Opacity
+        speechBubbleOpacityLayout = QHBoxLayout()
+        speechBubbleOpacityLayout.addWidget(QLabel(self.LANGUAGE['speechBubbleOpacity']))
+        speechBubbleOpacityLayout.addStretch(0)
+        self.speechBubbleOpacity = QLineEdit()
+        self.speechBubbleOpacity.setValidator(QRegularExpressionValidator(QRegularExpression("[1-9][0-9][0]")))
+        self.speechBubbleOpacity.setText(str(int(self.SETTING['speechBubbleOpacity']*100)))
+        self.speechBubbleOpacity.setMaximumWidth(50)
+        speechBubbleOpacityLayout.addWidget(self.speechBubbleOpacity)
+        speechBubbleOpacityLayout.addWidget(QLabel("%"))
+        settingPageLayout.addLayout(speechBubbleOpacityLayout)
 
         #add language selection
         languageLayout = QHBoxLayout()
-        languageLayout.addSpacing(15)
         languageLayout.addWidget(QLabel(self.LANGUAGE['language']))
         languageLayout.addStretch(0)
         self.languageChoice = QComboBox()
         self.languageChoice.addItem("English")
         self.languageChoice.addItem("中文")
-        self.languageChoice.setFixedSize(100,40)
+        self.languageChoice.setFixedWidth(100)
         self.languageChoice.setCurrentIndex(self.SETTING['language'])
         languageLayout.addWidget(self.languageChoice)
-        languageLayout.addSpacing(15)
-
         settingPageLayout.addLayout(languageLayout)
 
         #Add a stretch to the layout for spacing
@@ -269,16 +291,23 @@ class SettingMenu(QWidget):
 
 
     def SaveSetting(self):
-        #emit signal
+        
         start = int(self.movementIntervalStart.text())
         end = int(self.movementIntervalEnd.text())
+
         if start>= end:
             self.warning.emit(self.LANGUAGE['illegalInputWarning'])
             return
+        
+        clickDialogFrequency = int(self.clickDialogFrequency.text())
+        speechBubbleOpacity = int(self.speechBubbleOpacity.text())
+        if clickDialogFrequency > 100: clickDialogFrequency = 100
+        if speechBubbleOpacity > 100: speechBubbleOpacity = 100
+
         language = self.languageChoice.currentIndex()
         with open('assets/Settings/config.json', 'w+') as s:
-            json.dump({'start': start, 'end': end, 'language': language}, s)
-
+            json.dump({'start': start, 'end': end, 'language': language, 'clickDialogFrequency':clickDialogFrequency, 'speechBubbleOpacity':speechBubbleOpacity/100}, s)
+        #emit signal
         self.warning.emit(self.LANGUAGE['successfulSave'])
         self.quit()
 
@@ -536,10 +565,11 @@ class SettingMenu(QWidget):
         questionBoxLayout = QGridLayout()
         self.questionBox.setLayout(questionBoxLayout)
         #create places to enter name
-        message = QLabel(self.LANGUAGE['newBubble'])
+        message = QLabel(self.LANGUAGE['newBubble2'])
         message.setAlignment(Qt.AlignCenter)
         message.setWordWrap(True)
         self.speechSettingNameBox = QLineEdit()
+        self.speechSettingNameBox.setMinimumHeight(30)
         questionBoxLayout.addWidget(message, 0, 0, 1, 3)
         questionBoxLayout.addWidget(self.speechSettingNameBox, 1, 0, 1, 3)
         #create buttons
@@ -564,7 +594,6 @@ class SettingMenu(QWidget):
     def bubbleCreate(self, id):
         self.questionBox.close()
         content = self.speechSettingNameBox.text()
-        print(id, content)
         self.DIALOGS[id]['dialog'].append(content)
         self.bubbleReload(id)
 
