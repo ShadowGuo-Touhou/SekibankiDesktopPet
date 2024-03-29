@@ -59,8 +59,6 @@ class DesktopPet(QWidget):
         self.ORGINALHEIGHT = 372
         #the configuration
         self.SETTING = self._settingMenu.getConfig()
-        
-
 
     def _initTrayIcon(self):
         #import prepared trayicon image

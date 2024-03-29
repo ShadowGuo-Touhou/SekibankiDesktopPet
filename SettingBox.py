@@ -36,6 +36,7 @@ class SettingMenu(QWidget):
         self.initFrame()
         self.initSetting()
         self.initSpeechSetting()
+        self.initBubbleConfigPage()
         self.switchSettingPage()
 
         self.styleSheetSet()
@@ -54,9 +55,9 @@ class SettingMenu(QWidget):
             self.SETTING = {'start':20, 'end':300, 'language': 0}
         #load language, since there ain't really much text, I'll just embed language file in the code.
         if self.SETTING['language'] == 0:
-            self.LANGUAGE = {"moveInterval": "Movement Interval", "to": "to", "seconds": "seconds.", "language": "language", "illegalInputWarning": "Not gonna work, check your inputs, dummy.", "successfulSave": "Got it. I'll make the change after restart.", "newBubble":"Enter the name for new dialog group:", 'deleteBubble': "Confirm deleting", "error": "Error encountered:"}
+            self.LANGUAGE = {"moveInterval": "Movement Interval:", "to": "to", "seconds": "seconds.", "language": "language",'dialogInterval': 'Dialog Interval:', "illegalInputWarning": "Not gonna work, check your inputs, dummy.", "successfulSave": "Got it. I'll make the change after restart.", "newBubble":"Enter the name for new dialog group:", 'deleteBubble': "Confirm deleting", "error": "Error encountered:", "time": "Duration:", "color":"Speech bubble color:", 'tooManyClickWarning': "Hey! don't click so many times!\nMy creator didn't handle exceptions properly..."}
         else:
-            self.LANGUAGE = {'moveInterval': "移动时间间隔", 'to': '到', 'seconds': '秒。', 'language': '语言', 'illegalInputWarning': '参数错误，检查一下啦，笨蛋。', 'successfulSave': '知道啦，重启时改正~', 'newBubble': '请输入新对话列表的名称：', 'deleteBubble': '确认删除', "error":"遭遇错误："}
+            self.LANGUAGE = {'moveInterval': "移动时间间隔:", 'to': '到', 'seconds': '秒。', 'language': '语言', 'dialogInterval': '对话出现间隔：','illegalInputWarning': '参数错误，检查一下啦，笨蛋。', 'successfulSave': '知道啦，重启时改正~', 'newBubble': '请输入新对话列表的名称：', 'deleteBubble': '确认删除', "error":"遭遇错误：", 'time': "持续时间：", "color":"对话泡颜色：", "tooManyClickWarning": "喂！少点几下哦！\n作者没做Exception Handling啦..."}
 
             
     def loadDialog(self):
@@ -96,16 +97,18 @@ class SettingMenu(QWidget):
             bubbleLayout.addStretch(0)
             #The buttons
             #manage button
-            manage = QPushButton()
+            manage = self.NamedButton()
             manage.setFixedSize(50, 50)
             manage.setObjectName('manageButton')
+            manage.setText(dialog['id'])
+            manage.clicked.connect(lambda id: self.switchBubbleConfigPage(id))
             bubbleLayout.addWidget(manage)
             #Delete button
             delete = self.NamedButton()
             delete.setText(dialog['id'])
             delete.setFixedSize(50, 50)
             delete.setObjectName("deleteButton")
-            delete.clicked.connect(lambda text:self.speechBubbleDelete(text))
+            delete.clicked.connect(lambda id:self.speechBubbleDelete(id))
             bubbleLayout.addWidget(delete)
             bubbleLayout.addSpacing(10)
             
@@ -118,9 +121,9 @@ class SettingMenu(QWidget):
             super().__init__()
         def setText(self, a0):
             self.text = a0
-        def mousePressEvent(self, e: QMouseEvent | None) -> None:
+        def mousePressEvent(self, e):
             self.clicked.emit(self.text)
-            return super().mousePressEvent(e)
+            super().mousePressEvent(e)
     
     def speechBubbleDelete(self, id):
         self.deleteBox = QWidget(self)
@@ -163,7 +166,7 @@ class SettingMenu(QWidget):
             os.remove(f"assets/Dialogs/{id}.json")
             self.speechBubbleReload()
         except Exception as e:
-            self.warning.emit(f"{self.LANGUAGE['error']} {e}")
+            self.warning.emit(self.LANGUAGE['tooManyClickWarning'])
             print(e)
 
         self.deleteBox.close()
@@ -322,7 +325,6 @@ class SettingMenu(QWidget):
         addButton.clicked.connect(self.speechSettingGetName)
         speechBubbleControllerLayout.addWidget(addButton)
 
-
     #The page asking for uer input of speech bubble name
     def speechSettingGetName(self):
         self.questionBox = QWidget(self)
@@ -367,8 +369,288 @@ class SettingMenu(QWidget):
         #reload the list
         self.speechBubbleReload()
         
-        
+#DIalog configuration page------------------------------------------------------
+    #Switch to bubble config page, initialize page with corresponding dialog
+    def switchBubbleConfigPage(self, id):
+        #Set Id for buttons to return
+        self.bubbleTitle.setText(id)
+        self.addBubble.setText(id)
+        self.bubblePallette.setText(id)
+        self.bubbleConfirm.setText(id)
+        #fill configurations for the bubble
+        self.bubbleTimeStart.setText(str(self.DIALOGS[id]['start']))
+        self.bubbleTimeEnd.setText(str(self.DIALOGS[id]['end']))
+        self.bubbleColor.setStyleSheet(f"background-color:{self.DIALOGS[id]['color']}")
+        self.bubbleDuration.setText(str(self.DIALOGS[id]['time']))
 
+        #Generate the bubble list for self.bubbleContainer
+        self.bubbleContainer.setWidget(self.bubbleListGenerate(id))
+        #Switch to the layout
+        self.stackLayout.setCurrentIndex(2)
+
+    #configurate dialogues
+    def initBubbleConfigPage(self):
+        #Create a new stack page 
+        bubbleConfig = QWidget()
+        self.stackLayout.addWidget(bubbleConfig)
+        bubbleConfigLayout = QGridLayout()
+        bubbleConfig.setLayout(bubbleConfigLayout)
+
+        #title
+        self.bubbleTitle = QLabel()
+        self.bubbleTitle.setAlignment(Qt.AlignCenter)
+        bubbleConfigLayout.addWidget(self.bubbleTitle, 0, 0, 1, 5)
+
+        #Get time interval
+        bubbleTimeLayout = QHBoxLayout()
+        bubbleTimeLayout.addSpacing(10)
+        #Start
+        bubbleTimeLayout.addWidget(QLabel(self.LANGUAGE['dialogInterval']))
+        bubbleTimeLayout.addStretch(0)
+        self.bubbleTimeStart = QLineEdit()
+        self.bubbleTimeStart.setValidator(QRegularExpressionValidator(QRegularExpression("[1-9][0-9][0-9][0-9]")))
+        bubbleTimeLayout.addWidget(self.bubbleTimeStart)
+        bubbleTimeLayout.addWidget(QLabel(self.LANGUAGE['to']))
+        self.bubbleTimeStart.setFixedWidth(50)
+        #End
+        self.bubbleTimeEnd = QLineEdit()
+        self.bubbleTimeEnd.setValidator(QRegularExpressionValidator(QRegularExpression("[1-9][0-9][0-9][0-9]")))
+        bubbleTimeLayout.addWidget(self.bubbleTimeEnd)
+        bubbleTimeLayout.addWidget(QLabel(self.LANGUAGE['seconds']))
+        self.bubbleTimeEnd.setFixedWidth(50)
+        bubbleTimeLayout.addSpacing(10)
+        bubbleConfigLayout.addLayout(bubbleTimeLayout, 1, 0, 1, 5)
+
+        #Time
+        bubbleLiveLayout = QHBoxLayout()
+        bubbleLiveLayout.addSpacing(10)
+        bubbleLiveLayout.addWidget(QLabel(self.LANGUAGE['time']))
+        bubbleLiveLayout.addStretch(0)
+        self.bubbleDuration = QLineEdit()
+        self.bubbleDuration.setValidator(QRegularExpressionValidator(QRegularExpression("[1-9][0-9]")))
+        self.bubbleDuration.setFixedWidth(50)
+        bubbleLiveLayout.addWidget(self.bubbleDuration)
+        bubbleLiveLayout.addWidget(QLabel(self.LANGUAGE['seconds']))
+        bubbleLiveLayout.addSpacing(10)
+        bubbleConfigLayout.addLayout(bubbleLiveLayout, 2, 0, 1, 5)
+
+        #Color
+        bubbleColorLayout = QHBoxLayout()
+        bubbleColorLayout.addSpacing(10)
+        bubbleColorLayout.addWidget(QLabel(self.LANGUAGE['color']))
+        bubbleColorLayout.addStretch(0)
+        self.bubbleColor = QLabel()
+        self.bubbleColor.setObjectName("colorDisplay")
+        self.bubbleColor.setFixedWidth(50)
+        bubbleColorLayout.addWidget(self.bubbleColor)
+        bubbleColorLayout.addSpacing(10)
+        bubbleConfigLayout.addLayout(bubbleColorLayout, 3, 0, 1, 5)
+        
+        #container Area
+        self.bubbleContainer = QScrollArea()
+        self.bubbleContainer.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.bubbleContainer.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.bubbleContainer.setObjectName('speechBubbleScrollArea')
+        temp = QWidget()
+        self.bubbleContainer.setWidget(temp)
+        bubbleConfigLayout.addWidget(self.bubbleContainer, 4,0,7,4)
+        
+        #button area
+        bubbleButtonContainer = QVBoxLayout()
+        bubbleButtonContainer.addStretch(0)
+        #Add dialog button
+        self.addBubble = self.NamedButton()
+        self.addBubble.setFixedSize(60, 60)
+        self.addBubble.setObjectName('addButton')
+        self.addBubble.clicked.connect(lambda id: self.bubbleGetContent(id))
+        bubbleButtonContainer.addWidget(self.addBubble)
+        #Dialog color button
+        self.bubblePallette = self.NamedButton()
+        self.bubblePallette.setFixedSize(60, 60)
+        self.bubblePallette.setObjectName('paletteButton')
+        self.bubblePallette.clicked.connect(lambda id: self.bubbleGetColor(id))
+        bubbleButtonContainer.addWidget(self.bubblePallette)
+        #Confirm button 
+        self.bubbleConfirm = self.NamedButton()
+        self.bubbleConfirm.setFixedSize(60,60)
+        self.bubbleConfirm.setObjectName('confimButton')
+        self.bubbleConfirm.clicked.connect(lambda x: self.bubbleSave(x))
+        bubbleButtonContainer.addWidget(self.bubbleConfirm)
+        
+        bubbleButtonContainer.addStretch(0)
+        bubbleConfigLayout.addLayout(bubbleButtonContainer, 4,4, 7, 1)
+
+
+    #Generate the list of dialogs
+    def bubbleListGenerate(self, id):
+        #This QWidget is the container that holds individual dialogs
+        BubbleContainer = QWidget()
+        BubbleContainer.setStyleSheet("background-color: transparent")
+        BubbleContainerLayout = QVBoxLayout()
+        BubbleContainerLayout.setContentsMargins(0,5,0,0)
+        BubbleContainer.setLayout(BubbleContainerLayout)
+        
+        #Create speech bubbles for each dialog
+        for dialog in self.DIALOGS[id]['dialog']:
+            #Call upon self.bubbleGenerate to create a signle instance of bubble
+            BubbleContainerLayout.addWidget(self.bubbleGenerate(id, dialog))
+        #Return the QWidget for self.bubbleContainer to hold
+        return BubbleContainer
+    
+    #Generate a signle bubble
+    def bubbleGenerate(self, id, dialog):
+        #the body of bubble
+        bubble = QWidget()
+        bubble.setMinimumSize(495, 50)
+        bubble.setObjectName('bubble2')
+        bubbleLayout = QHBoxLayout()
+        bubble.setLayout(bubbleLayout)
+        #The id label of dialog
+        content = QLabel()
+        content.setMinimumWidth(400)
+        content.setAlignment(Qt.AlignVCenter)
+        content.setText(dialog)
+        content.setWordWrap(True)
+        bubbleLayout.addWidget(content)
+        #Add some fillings
+        bubbleLayout.addStretch(0)
+        #The button
+        #Delete button
+        delete = self.NamedButton()
+        delete.setText(f"{dialog}!@#$%^&*&^%$#@!{id}")
+        delete.setFixedSize(50, 50)
+        delete.setObjectName("deleteButton")
+        bubbleLayout.addWidget(delete)
+        bubbleLayout.addSpacing(10)
+        delete.clicked.connect(lambda x: self.bubbleDelete(x))
+        #Return the instance of bubble
+        return bubble
+    
+    #Add new bubble
+    def bubbleGetContent(self, id):
+        self.questionBox = QWidget(self)
+        self.questionBox.setObjectName('questionBox')
+        self.questionBox.setFixedSize(300, 200)
+        self.questionBox.move(150, 150)
+        #create a top layout
+        questionBoxLayout = QGridLayout()
+        self.questionBox.setLayout(questionBoxLayout)
+        #create places to enter name
+        message = QLabel(self.LANGUAGE['newBubble'])
+        message.setAlignment(Qt.AlignCenter)
+        message.setWordWrap(True)
+        self.speechSettingNameBox = QLineEdit()
+        questionBoxLayout.addWidget(message, 0, 0, 1, 3)
+        questionBoxLayout.addWidget(self.speechSettingNameBox, 1, 0, 1, 3)
+        #create buttons
+        #confirm
+        questionBoxButtonLayout = QHBoxLayout()
+        confirmButtom = QPushButton()
+        confirmButtom.setFixedSize(60, 60)
+        confirmButtom.setObjectName('confimButton')
+        questionBoxButtonLayout.addWidget(confirmButtom)
+        confirmButtom.clicked.connect(lambda: self.bubbleCreate(id))
+        #cancel
+        cancelButton = QPushButton()
+        cancelButton.setFixedSize(60, 60)
+        cancelButton.setObjectName('cancelButton')
+        cancelButton.clicked.connect(self.questionBox.close)
+        questionBoxButtonLayout.addWidget(cancelButton)
+
+        questionBoxLayout.addLayout(questionBoxButtonLayout, 2, 0, 2, 3)
+
+        self.questionBox.show()
+    #confirm the name
+    def bubbleCreate(self, id):
+        self.questionBox.close()
+        content = self.speechSettingNameBox.text()
+        print(id, content)
+        self.DIALOGS[id]['dialog'].append(content)
+        self.bubbleReload(id)
+
+
+    #Delete the dialog then re-generate the list
+    def bubbleDeleteDialog(self, stream):
+        self.deleteBox.close()
+        splited = stream.split('!@#$%^&*&^%$#@!')
+        try:
+            self.DIALOGS[splited[1]]['dialog'].remove(splited[0])
+        except:
+            self.warning.emit(self.LANGUAGE['tooManyClickWarning'])
+        self.bubbleReload(splited[1])
+
+        
+    #This window confirms if the user want to delete the dialog
+    def bubbleDelete(self, id):
+        self.deleteBox = QWidget(self)
+        self.deleteBox.setObjectName('questionBox')
+        self.deleteBox.setFixedSize(300, 200)
+        self.deleteBox.move(150, 150)
+        #create a top layout
+        questionBoxLayout = QGridLayout()
+        self.deleteBox.setLayout(questionBoxLayout)
+        #create places to enter name
+        message = QLabel(self.LANGUAGE['deleteBubble'])
+        message.setAlignment(Qt.AlignCenter)
+        questionBoxLayout.addWidget(message, 0, 0, 1, 3)
+        #create buttons
+        #confirm
+        questionBoxButtonLayout = QHBoxLayout()
+        confirmButtom = QPushButton()
+        confirmButtom.setFixedSize(60, 60)
+        confirmButtom.setObjectName('confimButton')
+        confirmButtom.clicked.connect(lambda: self.bubbleDeleteDialog(id))
+        questionBoxButtonLayout.addWidget(confirmButtom)
+        #cancel
+        cancelButton = QPushButton()
+        cancelButton.setFixedSize(60, 60)
+        cancelButton.setObjectName('cancelButton')
+        cancelButton.clicked.connect(self.deleteBox.close)
+        questionBoxButtonLayout.addWidget(cancelButton)
+
+        questionBoxLayout.addLayout(questionBoxButtonLayout, 1, 0, 2, 3)
+        self.deleteBox.show()
+
+    #Reload the list of bubbles
+    def bubbleReload(self, id):
+        self.bubbleContainer.setWidget(self.bubbleListGenerate(id))
+
+    #save all the changes to the dialog
+    def bubbleSave(self, id):
+        #get the start, end, and duration
+        start = int(self.bubbleTimeStart.text())
+        end = int(self.bubbleTimeEnd.text())
+        duration = int(self.bubbleDuration.text())
+        #Update the dictionary
+        self.DIALOGS[id]['start'] = start
+        self.DIALOGS[id]['end'] = end
+        self.DIALOGS[id]['time'] = duration
+        #Raise flag if start time greater than end
+        if start >= end:
+            self.warning.emit(self.LANGUAGE['illegalInputWarning'])
+            return
+        #return the the previous window and write the change to file
+        self.stackLayout.setCurrentIndex(1)
+        with open(r'assets/Dialogs/'+id+".json", 'w+') as s:
+            json.dump(self.DIALOGS[id], s)
+
+        
+    #Change bubble color
+    def bubbleGetColor(self, id):
+        #Create a color dialog for user to pick color
+        bubbleColor = QColorDialog()
+        bubbleColor.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
+        bubbleColor.setCurrentColor(QColor(self.DIALOGS[id]['color']))
+        bubbleColor.exec()
+        #Get name directly returns the hex for the color
+        color = bubbleColor.currentColor().name()
+        self.DIALOGS[id]['color'] = color
+        self.bubbleColor.setStyleSheet(f"background-color:{color}")
+
+    
+    #Allow desktop to grab the dialog list
+    def getDialog(self):
+        return self.DIALOGS
     
 
 #The generate a toolbar for pages------------------------------------------------------------------------
@@ -588,6 +870,7 @@ class SettingMenu(QWidget):
                     border-radius: 25px;
                     background-color: {buttonBackgroundColor};
                     image: url(assets/UI/Gear_Unselected.png);
+                    color: transparent;
                 }}
                 QPushButton#manageButton:hover{{
                     border-color: {buttonSelectedColor};
@@ -638,9 +921,36 @@ class SettingMenu(QWidget):
                     border-radius: 50px;
                 }}
                 QWidget#bubble:hover{{
-                    border-color: {frameBorderColor}
+                    border-color: {frameBorderColor};
                 }}
 
+                QPushButton#paletteButton{{
+                    border: 5px solid {buttonUnselectedColor};
+                    border-radius: 30px;
+                    background-color: {buttonBackgroundColor};
+                    image: url(assets/UI/Palette_Unselected.png);
+                }}
+                QPushButton#paletteButton:hover{{
+                    image: url(assets/UI/Palette_Unselected.png);
+                    border-color: {buttonSelectedColor};
+                }}
+                QPushButton#paletteButton:pressed{{
+                    border-color: {buttonSelectedColor};
+                    image: url(assets/UI/Palette_Selected.png);
+                }}
+
+                QLabel#colorDisplay{{
+                    border: 5px double black;
+                    border-radius: 10px
+                }}
+
+                QWidget#bubble2{{
+                    border: 5px solid {frameBorderColorLight};
+                    border-radius: 25px;
+                }}
+                QWidget#bubble2:hover{{
+                    border-color: {frameBorderColor};
+                }}
 
         """  
 
