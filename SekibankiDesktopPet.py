@@ -77,7 +77,6 @@ class DesktopPet(QWidget):
         #Add two events to the menu
         bigger_action = QAction("Bigger?", self, triggered = self._increaseSize)
         smaller_action = QAction("Smaller?", self, triggered=self._decreaseSize)
-        teleport = QAction("Teleport!", self, triggered=self._teleport)
         
         self._tray_icon_menu.addAction(display_action)
         self._tray_icon_menu.addAction(bigger_action)
@@ -88,39 +87,44 @@ class DesktopPet(QWidget):
         self._tray_menu.setContextMenu(self._tray_icon_menu)
         self._tray_menu.show()
 
-    
+    #create a timer that reset its interval upon triggered
+    class SpeechBubbleTimer(QTimer):
+        timeout = pyqtSignal(str)
+        def __init__(self, parent: QObject | None, id = 'default', start = 2, end = 10, color='white', fontcolor='black') -> None:
+            super().__init__(parent)
+            self.startI = start * 1000
+            self.endI = end * 1000
+            self.id = id
+            self.color = color
+            self.fontcolor = fontcolor
+
+        def timerEvent(self, a0: QTimerEvent | None) -> None:
+            self.setInterval(random.randint(self.startI, self.endI))
+            self.timeout.emit(self.id)
+            # print(f'{self.id} timeout')
+            return super().timerEvent(a0)
+        
+        def __str__(self) -> str:
+            
+            return self.id
+
+    #Second version of dialog
     def _initDialog(self):
-        #load dialog file in a list
-        self._standByDialogs = []
-        #Open local file
-        try:
-            with open("dialogs/standByDialogs.txt", encoding='utf-8') as f:
-                self._standByDialogs = f.read().split("\n")
-                length = len(self._standByDialogs)
-                i = 0
-                while i < length:
-                    if self._standByDialogs[i][0] == '#':
-                        self._standByDialogs.remove(self._standByDialogs[i])
-                        i -= 1
-                        length -= 1
-                    i += 1
-        except Exception as e:
-            self._standByDialogs.append(e)
-        #Click dialog
-        self._clickDialogs = []
-        try:
-            with open("dialogs/clickDialogs.txt", encoding='utf-8') as f:
-                self._clickDialogs = f.read().split("\n")
-                length = len(self._clickDialogs)
-                i = 0
-                while i < length:
-                    if self._clickDialogs[i][0] == '#':
-                        self._clickDialogs.remove(self._clickDialogs[i])
-                        i -= 1
-                        length -= 1
-                    i += 1
-        except Exception as e:
-            self._clickDialogs.append(e)
+        for dialog in self.DIALOGS.values():
+            if dialog['id'] == 'clickDialog':
+                continue
+            if not dialog['dialog']:
+                continue
+            timer = self.SpeechBubbleTimer(self, id=dialog['id'], start = dialog['start'], end = dialog['end'], color = dialog['color'])
+            timer.timeout.connect(lambda id: self._speechBubbling(id = id))
+            self._standByTimers[dialog['id']] = timer
+        
+    
+    #Trigger click dialog
+    def _triggerClickDialog(self):
+        if self._clickDialogExist == True and self.DIALOGS['clickDialog']['dialog']:
+            self._speechBubbling(id = 'clickDialog')
+        
 
 #The menu display----------------------------------------------------------------------------------------
     
@@ -129,6 +133,12 @@ class DesktopPet(QWidget):
         self._settingMenu = SettingMenu()
         self._settingMenu.finished.connect(self._SettingMenuClose)
         self._settingMenu.warning.connect(lambda x: self._speechBubbling(x))
+        self.DIALOGS = self._settingMenu.getDialog()
+        if 'clickDialog' in self.DIALOGS:
+            self._clickDialogExist = True
+        else: self._clickDialogExist = False
+        self._settingMenu.dialogChanged.connect(lambda id: self._dialogChanged(id))
+
 
     def _SettingMenuOpen(self):
         self._quitStandbyPhase()
@@ -159,6 +169,15 @@ class DesktopPet(QWidget):
             y = 0
         self._settingMenu.move(x,y)
 
+    def _dialogChanged(self, id):
+        self.DIALOGS = self._settingMenu.getDialog()
+        dialog = self.DIALOGS[id]
+        if not dialog['dialog'] or id == 'clickDialog':
+            return
+        timer = self.SpeechBubbleTimer(self, id=dialog['id'], start = dialog['start'], end = dialog['end'], color = dialog['color'])
+        timer.timeout.connect(lambda id: self._speechBubbling(id))
+        self._standByTimers[id] = timer
+    
 
 
 #Pet ImageDisplay----------------------------------------------------------------------------------------
@@ -187,13 +206,9 @@ class DesktopPet(QWidget):
         #start the timer
         self._wanderIngTimerReset()
 
-        #Create a timer for standby phase, the logic is the same with wandering timer
-        self._speechBubbleTimer = QTimer(self)
-        self._speechBubbleTimer.timeout.connect(self._speechBubbling)
-        self._speechBubbleTimer.setInterval(random.randint(20, 300)*1000) # 20 ~ 120 seconds
-        self._speechBubbleTimer.start()
-
-        self._standByTimers = [self._wanderingTimer, self._speechBubbleTimer]
+        #Create a container for timer
+        self._standByTimers = {} 
+        self._standByTimers['wanderingTimer'] = self._wanderingTimer
 
     #the function for wandering, becauses it involves a loop that can't be put in the main loop, we need another thread for it
     def _wandering(self):
@@ -288,19 +303,25 @@ class DesktopPet(QWidget):
     def _wanderIngTimerReset(self):
         self._wanderingTimer.start(random.randint(self.SETTING['start'], self.SETTING['end'])*1000)
     
-    def _speechBubbling(self, text = None, T2T = 5, priority = 0):
+    def _speechBubbling(self, text=None, id = None):
         #Don't creat new window if there is one already
-        if self._speechBubbleCondition == True and priority == 0:
+        if self._speechBubbleCondition == True:
             return
-        #Create an instance of speech bubble and set the text it displays
-        self._speechBubble = self._SpeechBubbleClass(self._petImageSize, opacity=self.SETTING['speechBubbleOpacity'])
-        if text != None:
+
+        #Determine what type of speech bubble to display
+        #If entered text, its a system text, default some attribute
+        if text:
+            self._speechBubble = self._SpeechBubbleClass(self._petImageSize, opacity=self.SETTING['speechBubbleOpacity'])
+            self._speechBubbleWork = self._SpeechBubbleWork(self, self._speechBubble, 3)
             self._speechBubble.setText(text)
         else:
-            self._speechBubble.setText(random.choice(self._standByDialogs))
+            self._speechBubble = self._SpeechBubbleClass(self._petImageSize, color = self.DIALOGS[id]['color'], opacity=self.SETTING['speechBubbleOpacity'], fontColor=self.DIALOGS[id]['textColor'])
+            self._speechBubbleWork = self._SpeechBubbleWork(self, self._speechBubble, self.DIALOGS[id]['time'])
+            self._speechBubble.setText(random.choice(self.DIALOGS[id]['dialog']))
+
+
         #Create a thread for speechbubble
         self._speechBubbleThread = QThread(parent=self)
-        self._speechBubbleWork = self._SpeechBubbleWork(self, self._speechBubble, T2T)
         #move to thread
         self._speechBubbleWork.moveToThread(self._speechBubbleThread)
         #connect the start of thread to speechBubbleWork's run function
@@ -321,7 +342,7 @@ class DesktopPet(QWidget):
     #Speech bubble is displayed above Desktop pet for a certain period of time when triggered.
     #Define a class for SpeechBubble for abstraction/code encapsulation
     class _SpeechBubbleClass(QMainWindow):
-        def __init__(self, scaler = 1, color = 'white', opacity = 1):
+        def __init__(self, scaler = 1, color = 'white', opacity = 1, fontColor = 'black'):
             super().__init__()
             #basic settings
             self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
@@ -335,7 +356,7 @@ class DesktopPet(QWidget):
             self._textBox.setMargin(int(20*scaler))
             color = QColor(color).getRgb()
             colorModified = (color[0],color[1],color[2], opacity)
-            self._textBox.setStyleSheet(f"border-style: groove; border-width: {int(5*scaler)}px; border-radius: 20px; background-color: rgba{colorModified}; font-size: {int(30*scaler)}px; color: rgb(0,0,0); ")
+            self._textBox.setStyleSheet(f"border-style: groove; border-width: {int(5*scaler)}px; border-radius: 20px; background-color: rgba{colorModified}; font-size: {int(30*scaler)}px; color:{fontColor} ")
 
             # font = QFont('Saitamaar.ttf')
             # self._textBox.setFont(font)
@@ -432,11 +453,6 @@ class DesktopPet(QWidget):
         self._draging = False
         self.setCursor(QCursor(Qt.ArrowCursor))
 
-    #Trigger click dialog
-    def _triggerClickDialog(self):
-        if random.randint(1, 100) < self.SETTING['clickDialogFrequency']:
-            self._speechBubbling(random.choice(self._clickDialogs), 0.5)
-
 
 #Minor Functions-----------------------------------------------------------------------------------------
         
@@ -485,12 +501,12 @@ class DesktopPet(QWidget):
     #Standby phase is when there isn't any user interaction with desktop pet. 
     #During standby phase, QTimers will kick for standby behaviors and speech bubbles, but they might leads to undertermined behavior if executed during user interactions. So, they have to paused.
     def _quitStandbyPhase(self):
-        for Timer in self._standByTimers:
+        for Timer in self._standByTimers.values():
             Timer.stop()
 
     #resume standby phase
     def _beginStandbyPhase(self):
-        for Timer in self._standByTimers:
+        for Timer in self._standByTimers.values():
             Timer.start()
 
     #change facing direction
