@@ -39,3 +39,30 @@ The first version - 2024/3/12: added the basic display of desktop pet image and 
     ["Movement interval starts", "Movement interval ends", "language"]
 
     Note: there are alogrithms detecting mouse movement known as hud, which tracts the movement of mouse.
+
+2024/4/10
+    I'm beginning to write the physic simulation of DesktopPet today.
+    First about, I need to get the user mouse movement speed, which can be easily accompolished by subtracting self._previous_drag_pos.x() from eventPos.x(). They are both used for original movement calculation.
+
+    The end goal is to get the Δθ (change in angle) of the pet in response to the user movement. Using the circular movement of kinomatic equation, we have:
+
+        Δθ = (wi)t + (1/2)(a)(t**2)
+    
+    To find t (time), we can use momentum impluse equation:
+
+        Iw = τt = ΔL
+        t = Iw/τ
+    
+    Since we are in a virtual environment, I can assume that mouse applies a constant torque τ upon desktop pet, and the moment of inertia I is all constant. Of course, this is based on the premise that the pivot (where user clicks) is fixed.
+
+    I realized that I can actually simulate the pendulem without using momentum impulse equation. In equation Δθ = (wi)t + (1/2)(a)(t**2), acceleration (a) is the gravity. I can then easily derive Δθ with this equation.
+    
+    dTheta = moveSpeed*(t)-(1/2)*gravity*(t)**(1/2)
+    pic = QPixmap('normalState/Drag.gif').transformed(QTransform().rotate(dTheta))
+    self.petLabel.setPixmap(pic)
+    
+    This is my first attempt in simulating pendulem, and of course, it failed.
+    The biggest problem with it is that I assume use grab pet by middle top, but the rotation center of QTransform is top left.
+    Second, the alogrithm isn't smooth enough. There are significant lag in rotation. 
+
+
