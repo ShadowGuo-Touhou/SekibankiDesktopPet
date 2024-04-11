@@ -137,7 +137,7 @@ class DesktopPet(QWidget):
         if 'clickDialog' in self.DIALOGS:
             self._clickDialogExist = True
         else: self._clickDialogExist = False
-        self._settingMenu.dialogChanged.connect(lambda id: self._dialogChanged(id))
+        self._settingMenu.dialogChanged.connect(lambda id: self._dialogChanged(id=id))
 
 
     def _SettingMenuOpen(self):
@@ -174,8 +174,9 @@ class DesktopPet(QWidget):
         dialog = self.DIALOGS[id]
         if not dialog['dialog'] or id == 'clickDialog':
             return
+        self._standByTimers.pop(id).deleteLater()
         timer = self.SpeechBubbleTimer(self, id=dialog['id'], start = dialog['start'], end = dialog['end'], color = dialog['color'])
-        timer.timeout.connect(lambda id: self._speechBubbling(id))
+        timer.timeout.connect(lambda id: self._speechBubbling(id = id))
         self._standByTimers[id] = timer
     
 
