@@ -5,6 +5,7 @@ from PyQt5.QtCore import *
 from PyQt5.QtGui import QPainter
 from PyQt5.QtWidgets import *
 from SettingBox import SettingMenu
+from math import tan, pi
 #Inspired by: https://zhuanlan.zhihu.com/p/521580516
 
 class DesktopPet(QWidget):
@@ -46,7 +47,8 @@ class DesktopPet(QWidget):
         #the facing state of pet: 0 is facing right, 1 is facing left
         self.__facingDirection = None
         #The array containing the states for desktopPet
-        self.normalStates = ["normalState/Sekibanki1 right.gif", "normalState/Sekibanki1 left.gif"]
+        self.normalStates = [r"assets\Sprite\normalRIght.gif", r"assets\Sprite\normalLeft.gif"]
+        self.dragState = [r"assets\Sprite\dragRIght.png", r"assets\Sprite\dragLeft.png"]
         #Condition to see if the pet is talking
         self._speechBubbleCondition = False
         self._draggable = True
@@ -57,6 +59,7 @@ class DesktopPet(QWidget):
         self.WINDOWHEIGHT = QApplication.primaryScreen().size().height()
         self.ORGINALWIDTH = 421
         self.ORGINALHEIGHT = 372
+        self.MARGIN = 200
         #the configuration
         self.SETTING = self._settingMenu.getConfig()
 
@@ -186,6 +189,7 @@ class DesktopPet(QWidget):
     def _initPetImage(self):
         #create a label that stores the image of pet
         self.petLabel = QLabel(self)
+        
 
         #randomly choose a starting facing direction for pet
         self._changeFacingDirection(random.randint(0,1))
@@ -253,6 +257,7 @@ class DesktopPet(QWidget):
             #pass in the DesktopPet class so we can call on its move function
             self.mainWindow = mw
             self.mr = int(mr)
+            self.margin = int(mw.MARGIN*mw._petImageSize/2)
 
         def run(self):
             #The range of movement distance is movementrange "mr" pixel to both side
@@ -260,8 +265,13 @@ class DesktopPet(QWidget):
             currentPos = self.mainWindow.pos()
             screenSize = QApplication.primaryScreen().size()
             #random a destine position with random.randint(a,b). a and b equals to either 0 or maxscreen (width/height  - half of the desktop pet size) if out of screen. (that's some long ass code!)
-            xDestiny = random.randint(currentPos.x() - self.mr if currentPos.x() > self.mr else 0, currentPos.x() + self.mr if screenSize.width() > currentPos.x() + self.mr + self.mainWindow.size().width() else screenSize.width()-self.mainWindow.size().width())
-            yDestiny = random.randint(currentPos.y() - self.mr if currentPos.y() > self.mr else 0, currentPos.y() + self.mr if screenSize.height()> currentPos.y() + self.mr + self.mainWindow.size().height() else screenSize.height()-self.mainWindow.size().height())
+            xStart = currentPos.x() - self.mr + self.margin if currentPos.x() > self.mr - self.margin else 0 - self.margin
+            xEnd = currentPos.x() - self.margin + self.mr if screenSize.width() > currentPos.x() + self.mr + self.mainWindow.size().width() - self.margin else screenSize.width()-self.mainWindow.size().width() + self.margin
+            xDestiny = random.randint(xStart, xEnd)
+            
+            yStart= currentPos.y() + self.margin - self.mr if currentPos.y() > self.mr - self.margin else 0 - self.margin
+            yEnd = currentPos.y() + self.mr - self.margin if screenSize.height()> currentPos.y() + self.mr + self.mainWindow.size().height() - self.margin else screenSize.height()-self.mainWindow.size().height() + self.margin
+            yDestiny = random.randint(yStart, yEnd)
             #calculates the difference between current position and destiny. For the sake of memory, I'll reuse variables. This step converts the absolute position on a screen to a relative position to the current position.
             #This is esscentially a substraction of two R2 vectors.
             xDestiny = xDestiny - currentPos.x()
@@ -402,15 +412,15 @@ class DesktopPet(QWidget):
                 mainWidth = self.mainWindow.size().width()
                 mainHeight = self.mainWindow.size().height()
                 xPos = mainPos.x() + mainWidth//2 - selfWidth//2
-                yPos = mainPos.y() - selfHight
+                yPos = mainPos.y() - selfHight + self.mainWindow.MARGIN*self.mainWindow._petImageSize//2
 
                 #prevent the speech bubble from going off screen
                 if xPos < 0: xPos = 0
                 elif xPos+selfWidth>screenWidth: xPos = screenWidth - selfWidth
                 #If the space above desktop isn't enought, move the speech bubble down
-                if yPos < 0: yPos = mainPos.y() + mainHeight + selfHight//2
+                if yPos < 0: yPos = mainPos.y() + mainHeight - self.mainWindow.MARGIN*self.mainWindow._petImageSize//2
 
-                self.move.emit([xPos, yPos])
+                self.move.emit([int(xPos), int(yPos)])
                 #FPS
                 time.sleep(1/30)
             self.finished.emit()
@@ -450,6 +460,7 @@ class DesktopPet(QWidget):
 
     def mouseReleaseEvent(self, event):
         #resume standby phase
+        self._changeFacingDirection(self._facingDirection)
         self._beginStandbyPhase()
         self._draging = False
         self.setCursor(QCursor(Qt.ArrowCursor))
@@ -479,23 +490,27 @@ class DesktopPet(QWidget):
     def _petDragMovement(self, eventPos:int, ) -> None:
         #decide the current facing direction by mius
         facingDirection = self._previous_drag_pos.x() - eventPos.x()
-        if facingDirection <0: facingDirection = 1
-        elif facingDirection >0: facingDirection = 0
+        #Grab the change in position
+        dx = abs(facingDirection)
+        #adjust the facingDirection based on the sign of difference
+        self._facingDirection = 1 if facingDirection < 0 else 0
 
-        if self._facingDirection == facingDirection:
-            pass
-        else:
-            self._changeFacingDirection(facingDirection)
+        #call the drag movement angle for the drag physic effect
+        self._changeDragAngle(dx)
+
+        #Margin
+        margin = self.MARGIN * self._petImageSize //2
+
         #update previous drag pos
         self._previous_drag_pos = eventPos
         destination = eventPos-self._drag_pos
-        xPos = destination.x()
+        xPos = destination.x() 
         yPos = destination.y()
-        if xPos < 0: xPos = 0
-        elif xPos > self.WINDOWWIDTH - self.width(): xPos = self.WINDOWWIDTH - self.width()
+        if xPos < 0 - margin: xPos = 0 - margin
+        elif xPos > self.WINDOWWIDTH - self.width() + margin: xPos = self.WINDOWWIDTH - self.width() + margin
 
-        if yPos < 0: yPos = 0
-        elif yPos > self.WINDOWHEIGHT - self.height(): yPos = self.WINDOWHEIGHT - self.height()
+        if yPos < 0 - margin: yPos = 0 - margin
+        elif yPos > self.WINDOWHEIGHT - self.height() + margin: yPos = self.WINDOWHEIGHT - self.height() + margin
 
         self.move(xPos, yPos)
 
@@ -523,6 +538,36 @@ class DesktopPet(QWidget):
         #begin to play the gif
         self.petImage.start()
 
+    def _changeDragAngle(self, dx):
+        #if the greatest dx can be is 50
+        if dx > 90: dx = 90
+
+        #dx is the change in position, i.e.velocity of the cursor
+        #Use equation Δθ = (wi)t + (1/2)(a)(t**2) to derive the angle change
+        t = 1
+        a = -0.5
+        dTheta = dx*t + 0.5*a*(t)**2
+        #Change rotation direction based of facingDirection
+        dTheta = -dTheta if self._facingDirection == 0 else dTheta
+
+        #Get the center of the pet
+        center = (self.size().width()//2, self.size().height()//2)
+        #find the angle between the click point and the center by tangent
+        xdiff = center[0] - self._drag_pos.x()
+        ydiff = center[1] - self._drag_pos.y()
+        angle = tan(xdiff/ydiff)* (180/pi)
+
+        
+
+        #Grab the sprite corresponding to the facing direction
+        banki = QPixmap(self.dragState[self._facingDirection])
+        banki.scaled(int(self.ORGINALWIDTH*self._petImageSize), int(self.ORGINALHEIGHT*self._petImageSize))
+
+        
+        #Rotate image based dTheta, which is achieved by QTransformed class
+        #Translate function will adjust the origin of the transformation, we first transform it to where the user click it according to the existing self._drag_pos, rotate it, than transform back
+        tranformer = QTransform().translate(self._drag_pos.x(), self._drag_pos.y()).rotate(dTheta).translate(-self._drag_pos.x(), -self._drag_pos.y())
+        self.petLabel.setPixmap(banki.transformed(tranformer))
 
     def _resize(self):
         #get the width&height after resize
@@ -530,9 +575,10 @@ class DesktopPet(QWidget):
         newHeight = int(self.ORGINALHEIGHT*self._petImageSize)
         #rescale petImage with it.
         self.petImage.setScaledSize(QSize(newWidth, newHeight))
-        #Resize the window and the label holding gif
-        self.resize(newWidth, newHeight)
-        self.petLabel.resize(newWidth, newHeight)
+        #Resize the window and the label holding gif        
+        self.resize(newWidth+self.MARGIN, newHeight+self.MARGIN)
+        self.petLabel.resize(newWidth+self.MARGIN, newHeight+self.MARGIN)
+        self.petLabel.move(self.MARGIN//2, 0)
         
         
 

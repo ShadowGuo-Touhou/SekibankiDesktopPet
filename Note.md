@@ -65,4 +65,8 @@ The first version - 2024/3/12: added the basic display of desktop pet image and 
     The biggest problem with it is that I assume use grab pet by middle top, but the rotation center of QTransform is top left.
     Second, the alogrithm isn't smooth enough. There are significant lag in rotation. 
 
+2024/4/11
+    I managed to fixed the center of rotation problem by using the translate function of QTransform. Translate shifts the center of rotation alone the plane. The lag problem was also addressed by adjusting the frame rate. 
+    
+    As I was developing, I realized that sometimes the rotated image will go out of the boundary of display area, leading to some of it getting corped. I tried to auto adjust the size of the display area, but that messed up the display posiiton of speechbubble... In the end, I had to add an extra layer of margin to the pet, and changed every single lines of code related to movement and scaling....SO FUN.
 
