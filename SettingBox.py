@@ -393,12 +393,13 @@ class SettingMenu(QWidget):
     #confirm the name
     def speechBubbleCreate(self):
         name = self.speechSettingNameBox.text()
-        newBubble = {'color':'white','textColor':'black', 'start':30, 'end': 200, 'time':5, 'id':name, 'dialog':[]}
-        with open(f'assets/Dialogs/{name}.json', 'w+') as s:
-            json.dump(newBubble, s)
-        self.questionBox.close()
-        #reload the list
-        self.speechBubbleReload()
+        if name:
+            newBubble = {'color':'white','textColor':'black', 'start':30, 'end': 200, 'time':5, 'id':name, 'dialog':[]}
+            with open(f'assets/Dialogs/{name}.json', 'w+') as s:
+                json.dump(newBubble, s)
+            self.questionBox.close()
+            #reload the list
+            self.speechBubbleReload()
         
 #DIalog configuration page------------------------------------------------------
     #Switch to bubble config page, initialize page with corresponding dialog
@@ -599,8 +600,9 @@ class SettingMenu(QWidget):
     def bubbleCreate(self, id):
         self.questionBox.close()
         content = self.speechSettingNameBox.text()
-        self.DIALOGS[id]['dialog'].append(content)
-        self.bubbleReload(id)
+        if content:
+            self.DIALOGS[id]['dialog'].append(content)
+            self.bubbleReload(id)
 
 
     #Delete the dialog then re-generate the list
