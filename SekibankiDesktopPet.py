@@ -5,7 +5,7 @@ from PyQt5.QtCore import *
 from PyQt5.QtGui import QPainter
 from PyQt5.QtWidgets import *
 from SettingBox import SettingMenu
-from math import tan, pi
+from math import pi, atan, cos, sin
 #Inspired by: https://zhuanlan.zhihu.com/p/521580516
 
 class DesktopPet(QWidget):
@@ -59,7 +59,7 @@ class DesktopPet(QWidget):
         self.WINDOWHEIGHT = QApplication.primaryScreen().size().height()
         self.ORGINALWIDTH = 421
         self.ORGINALHEIGHT = 372
-        self.MARGIN = 200
+        self.MARGIN = 250
         #the configuration
         self.SETTING = self._settingMenu.getConfig()
 
@@ -163,7 +163,7 @@ class DesktopPet(QWidget):
         selfSize = self.size()
         menuSize = self._settingMenu.size()
         #put x to the right of the desktop pet
-        x = currPos.x() + selfSize.width() if self.WINDOWWIDTH - currPos.x() - selfSize.width() > menuSize.width() else currPos.x() - menuSize.width()
+        x = currPos.x() + selfSize.width() - self.MARGIN//2 if self.WINDOWWIDTH - currPos.x() - selfSize.width() + self.MARGIN//2> menuSize.width() else currPos.x() - menuSize.width() + self.MARGIN//2
         y = currPos.y() + selfSize.height()//2 - menuSize.height()//2
         if y + menuSize.height() > self.WINDOWHEIGHT:
             y = self.WINDOWHEIGHT - menuSize.height()
@@ -433,6 +433,8 @@ class DesktopPet(QWidget):
     def mousePressEvent(self, event):
         #Quite standby phase, lest undetermined behavior
         self._quitStandbyPhase()
+        #Flag for pet transformation
+        self._rotationMatrixTranslate = True
 
         #Enter drag event if mouse pressed is left button
         if event.button() == Qt.LeftButton and self._draggable:
@@ -496,9 +498,9 @@ class DesktopPet(QWidget):
         self._facingDirection = 1 if facingDirection < 0 else 0
 
         #call the drag movement angle for the drag physic effect
-        self._changeDragAngle(dx)
+        self._changeDragAngle(dx, eventPos)
 
-        #Margin
+        # #Margin
         margin = self.MARGIN * self._petImageSize //2
 
         #update previous drag pos
@@ -512,7 +514,7 @@ class DesktopPet(QWidget):
         if yPos < 0 - margin: yPos = 0 - margin
         elif yPos > self.WINDOWHEIGHT - self.height() + margin: yPos = self.WINDOWHEIGHT - self.height() + margin
 
-        self.move(xPos, yPos)
+        self.move(int(xPos), int(yPos))
 
     #Standby phase is when there isn't any user interaction with desktop pet. 
     #During standby phase, QTimers will kick for standby behaviors and speech bubbles, but they might leads to undertermined behavior if executed during user interactions. So, they have to paused.
@@ -538,7 +540,7 @@ class DesktopPet(QWidget):
         #begin to play the gif
         self.petImage.start()
 
-    def _changeDragAngle(self, dx):
+    def _changeDragAngle(self, dx, eventPos):
         #if the greatest dx can be is 50
         if dx > 90: dx = 90
 
@@ -553,21 +555,36 @@ class DesktopPet(QWidget):
         #Get the center of the pet
         center = (self.size().width()//2, self.size().height()//2)
         #find the angle between the click point and the center by tangent
-        xdiff = center[0] - self._drag_pos.x()
+        xdiff = -(center[0] - self._drag_pos.x())
+        if xdiff == 0: xdiff = 1
         ydiff = center[1] - self._drag_pos.y()
-        angle = tan(xdiff/ydiff)* (180/pi)
+        grabAngle = atan(ydiff/xdiff) * (180/pi)
+        # print(f"<{xdiff}, {ydiff}>, angle = {grabAngle}")
 
+        #Calculated the position after the swing effect applied with the rotation matrix
+        # if self._rotationMatrixTranslate:
+        #     transformAngle = grabAngle-90 if xdiff>0 else grabAngle+90
+        #     xPrime = eventPos.x()*cos(transformAngle)- eventPos.y()*sin(transformAngle)
+        #     yPrime = eventPos.x()*sin(transformAngle)+ eventPos.y()*cos(transformAngle)
+        #     print(self._drag_pos.x(), self._drag_pos.y(), xPrime, yPrime, transformAngle)
+        #     # self._previous_drag_pos = QPoint(int(xPrime), int(yPrime))
+        #     self.move(self.pos().x()+int(xPrime), self.pos().y()+int(yPrime))
+
+        #     self._rotationMatrixTranslate = False
+
+        #Grab the sprite corresponding to the facing direction and then scale it according to the scaler
+        banki = QPixmap(self.dragState[self._facingDirection]).scaled(int(self.ORGINALWIDTH*self._petImageSize), int(self.ORGINALHEIGHT*self._petImageSize))
         
-
-        #Grab the sprite corresponding to the facing direction
-        banki = QPixmap(self.dragState[self._facingDirection])
-        banki.scaled(int(self.ORGINALWIDTH*self._petImageSize), int(self.ORGINALHEIGHT*self._petImageSize))
-
         
-        #Rotate image based dTheta, which is achieved by QTransformed class
-        #Translate function will adjust the origin of the transformation, we first transform it to where the user click it according to the existing self._drag_pos, rotate it, than transform back
-        tranformer = QTransform().translate(self._drag_pos.x(), self._drag_pos.y()).rotate(dTheta).translate(-self._drag_pos.x(), -self._drag_pos.y())
+        if ydiff > 0:
+            #If user grabs the upper part of the pet, apply slant effect if the mouse isn't on the center
+            tranformer = QTransform().translate(center[0], center[1]).rotate(grabAngle-90 if xdiff>0 else grabAngle+90).rotate(dTheta)
+        else:
+            #else, apply swing effect only
+            tranformer = QTransform().rotate(dTheta)
         self.petLabel.setPixmap(banki.transformed(tranformer))
+        tranformer = QTransform()
+        # self.petLabel.setPixmap(banki.transformed(tranformer))
 
     def _resize(self):
         #get the width&height after resize
