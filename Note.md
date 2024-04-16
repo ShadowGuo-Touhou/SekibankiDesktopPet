@@ -56,8 +56,10 @@ The first version - 2024/3/12: added the basic display of desktop pet image and 
     Since we are in a virtual environment, I can assume that mouse applies a constant torque τ upon desktop pet, and the moment of inertia I is all constant. Of course, this is based on the premise that the pivot (where user clicks) is fixed.
 
     I realized that I can actually simulate the pendulem without using momentum impulse equation. In equation Δθ = (wi)t + (1/2)(a)(t**2), acceleration (a) is the gravity. I can then easily derive Δθ with this equation.
-    
-    dTheta = moveSpeed*(t)-(1/2)*gravity*(t)**(1/2)
+    dx = 90 if dx > 90 else dx (dx is the mouse speed, the fastest it can get is 90 pixel/frame)
+    t = 1
+    a = -0.5
+    dTheta = dx*t + 0.5*a*(t)**2 (The range of dTheta is [0.75, 89.75])
     pic = QPixmap('normalState/Drag.gif').transformed(QTransform().rotate(dTheta))
     self.petLabel.setPixmap(pic)
     
@@ -70,3 +72,26 @@ The first version - 2024/3/12: added the basic display of desktop pet image and 
     
     As I was developing, I realized that sometimes the rotated image will go out of the boundary of display area, leading to some of it getting corped. I tried to auto adjust the size of the display area, but that messed up the display posiiton of speechbubble... In the end, I had to add an extra layer of margin to the pet, and changed every single lines of code related to movement and scaling....SO FUN.
 
+2024/4/15
+    I managed to let pet rotate on centering the point where user clicks it. However, once again I don't understand the code I wrote:
+
+    1 center = (self.size().width()//2, self.size().height()//2) #Finding the center coordinate of of the pet 
+    2 xdiff = -(center[0] - self._drag_pos.x()) #calculate of width of triangle, by default, the positive x in math corresponds to negative x in the program, so I reversed the sign for calculation.
+    4 ydiff = center[1] - self._drag_pos.y() #calculated the height of the triangle
+
+    5 if xdiff == 0: xdiff = 1 #Prevent divided by 0 error (Horizontal slop)
+    6 grabAngle = atan(ydiff/xdiff) * (180/pi) #Get the radiant of the angle and convert it to degrees
+
+    7 QTransform().rotate(grabAngle-90 if xdiff>0 else grabAngle+90).rotate(dTheta) #Transform
+
+    Line 7 is what I failed to understand.
+    Here is my origin code:
+
+    7 QTransform().translate(center[0], center[1]).rotate(grabAngle-90 if xdiff>0 else grabAngle+90).rotate(dTheta).translate(-center[0], -center[1])
+
+    You see, digital images doesn't use the rectangle coordinate plane we're familar with, rather, the origin is on the top lett, and moving downward corresponds to positive y. That is to say, when perform matrix operations, I need to translate the origin of the image center to the coordinate center for the rotation to work properly. That is accompolished by: .translate(center[0], center[1]).
+    Rotate the image by granAngle to simulate the effect of grabing at an angle. 
+    Rotate the image by the dTheta to simulate the effect of pet swing around.
+    Lastly, move translate the image center back to where it should be.
+
+    Yet, the thing worked without the translation of the center. Very, very, perplexing.

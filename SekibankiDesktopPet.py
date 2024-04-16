@@ -5,7 +5,7 @@ from PyQt5.QtCore import *
 from PyQt5.QtGui import QPainter
 from PyQt5.QtWidgets import *
 from SettingBox import SettingMenu
-from math import pi, atan, cos, sin
+from math import pi, atan,atan2, cos, sin, radians
 #Inspired by: https://zhuanlan.zhihu.com/p/521580516
 
 class DesktopPet(QWidget):
@@ -100,6 +100,7 @@ class DesktopPet(QWidget):
             self.id = id
             self.color = color
             self.fontcolor = fontcolor
+            self.setInterval(random.randint(self.startI, self.endI))
 
         def timerEvent(self, a0: QTimerEvent | None) -> None:
             self.setInterval(random.randint(self.startI, self.endI))
@@ -173,7 +174,7 @@ class DesktopPet(QWidget):
         self._settingMenu.move(x,y)
 
     def _dialogChanged(self, id):
-        if id in self.DIALOGS.keys():
+        if id in self.DIALOGS.keys() and id != 'clickDialog':
             self._standByTimers.pop(id).deleteLater()
         self.DIALOGS = self._settingMenu.getDialog()
         dialog = self.DIALOGS[id]
@@ -198,9 +199,6 @@ class DesktopPet(QWidget):
         #go to a random position on the desktop
         randomPos = self._randomPos()
         self.move(randomPos[0], randomPos[1])
-        
-
-
 
 #Pet Standby Actions-------------------------------------------------------------------------------------
 
@@ -450,6 +448,7 @@ class DesktopPet(QWidget):
         self._triggerClickDialog()
 
 
+
         event.accept()
         #Change the cursor type while draging
         self.setCursor(QCursor(Qt.OpenHandCursor))
@@ -467,7 +466,6 @@ class DesktopPet(QWidget):
         self._beginStandbyPhase()
         self._draging = False
         self.setCursor(QCursor(Qt.ArrowCursor))
-
 
 #Minor Functions-----------------------------------------------------------------------------------------
         
@@ -498,14 +496,15 @@ class DesktopPet(QWidget):
         #adjust the facingDirection based on the sign of difference
         self._facingDirection = 1 if facingDirection < 0 else 0
 
-        #call the drag movement angle for the drag physic effect
-        self._changeDragAngle(dx, eventPos)
 
-        # #Margin
+
+        #Margin
         margin = self.MARGIN * self._petImageSize //2
 
         #update previous drag pos
         self._previous_drag_pos = eventPos
+        #call the drag movement angle for the drag physic effect
+        self._changeDragAngle(dx, eventPos)
         destination = eventPos-self._drag_pos
         xPos = destination.x() 
         yPos = destination.y()
@@ -550,42 +549,103 @@ class DesktopPet(QWidget):
         t = 1
         a = -0.5
         dTheta = dx*t + 0.5*a*(t)**2
+
         #Change rotation direction based of facingDirection
-        dTheta = -dTheta if self._facingDirection == 0 else dTheta
+        # dTheta = -dTheta if self._facingDirection == 0 else dTheta
+        
+    #simulate the physic effect of pet rotated due to gravity around the grab(pivot) point
+    #Since the grab position doesn't change during the drag, we only need it to run once
+        if self._rotationMatrixTranslate:
+            #Find the difference in Y from the center of the pet
+            ydiff = self.size().height()//2- self._drag_pos.y()
+            #Find the difference in X from the center of the pet
+            xdiff = -(self.size().width()//2 - self._drag_pos.x())
+            #Prevent divided by 0 error
+            if xdiff == 0: xdiff = 1
+            grabAngle = atan(ydiff/xdiff) * (180/pi)
+            self.grabAngle = grabAngle-90 if xdiff>0 else grabAngle+90
+            # grabAngle= self.grabAngle if self.grabAngle>0 else grabAngle+90
+            # # grabAngle = -60
+            # # self.grabAngle = 300
 
-        #Get the center of the pet
-        center = (self.size().width()//2, self.size().height()//2)
-        #find the angle between the click point and the center by tangent
-        xdiff = -(center[0] - self._drag_pos.x())
-        if xdiff == 0: xdiff = 1
-        ydiff = center[1] - self._drag_pos.y()
-        grabAngle = atan(ydiff/xdiff) * (180/pi)
-        # print(f"<{xdiff}, {ydiff}>, angle = {grabAngle}")
+            # angle = radians(grabAngle)
 
-        #Calculated the position after the swing effect applied with the rotation matrix
-        # if self._rotationMatrixTranslate:
-        #     transformAngle = grabAngle-90 if xdiff>0 else grabAngle+90
-        #     xPrime = eventPos.x()*cos(transformAngle)- eventPos.y()*sin(transformAngle)
-        #     yPrime = eventPos.x()*sin(transformAngle)+ eventPos.y()*cos(transformAngle)
-        #     print(self._drag_pos.x(), self._drag_pos.y(), xPrime, yPrime, transformAngle)
-        #     # self._previous_drag_pos = QPoint(int(xPrime), int(yPrime))
-        #     self.move(self.pos().x()+int(xPrime), self.pos().y()+int(yPrime))
+            # shiftDistance = QPoint(self.size().width()//2, self.size().height()//2) + self.pos()
+            # # eventPos = QPoint(731, 500)
 
-        #     self._rotationMatrixTranslate = False
+            # clickPointT = eventPos - shiftDistance
+            # topLeftT = self.pos()-shiftDistance
+            
+
+            # #Finding the position of the rotated points.
+            # # the rotation is accompolished by the following matrix operation:
+            # # |x| \/ |cosθ -sinθ|
+            # # |y| /\ |sinθ  cosθ|
+            # # x = xcosθ - ysinθ
+            # # y = xsinθ + ycosθ
+
+            # #CLickpoint rotated
+            # xPrime = clickPointT.x()*cos(angle) - clickPointT.y()*sin(angle)
+            # yPrime = clickPointT.x()*sin(angle) + clickPointT.x()*cos(angle)
+            # clickPointTR = QPoint(int(xPrime), int(yPrime))
+        
+
+            # #Topleft rotated
+            # xPrime = topLeftT.x()*cos(angle) - topLeftT.y()*sin(angle)
+            # yPrime = topLeftT.x()*sin(angle) + topLeftT.x()*cos(angle)
+            # topLeftTR = QPoint(int(xPrime), int(yPrime))
+
+            # #Find the distance from topleft rotated to it's origin
+            # shiftDistance2 = eventPos - clickPointTR 
+            # topLeftTT = topLeftT+shiftDistance2
+
+            # print(f"""
+            #     Topleft = {self.pos().x(), self.pos().y()}
+            #     Click position = {eventPos.x(), eventPos.y()}
+            #     Shift distance = {shiftDistance.x(), shiftDistance.y()}
+
+            #     Topleft translated = {topLeftT.x(), topLeftT.y()}
+            #     Click position translated = {clickPointT.x(), clickPointT.y()}
+
+            #     Angle: rad={angle} deg={grabAngle} self.grabAnge={self.grabAngle}
+            #     cos(Angle) = {cos(angle)}, sin(Angle) = {sin(angle)}
+            #     Topleft rotated = {topLeftTR.x(), topLeftTR.y()}
+            #     Click position rotated = {clickPointTR.x(), clickPointTR.y()}
+            #     Shift distance2 = {shiftDistance2.x(), shiftDistance2.y()}
+            #     Topleft translated again = {topLeftTT.x(), topLeftTT.y()}
+
+            # """)
+            #Move the rotated topleft by shiftDistance
+            transformer = QTransform().translate(self.size().width()/2, self.size().height()/2).rotate(self.grabAngle).translate(-self.size().width()/2, -self.size().height()/2)
+            point = transformer.map(self._drag_pos)
+
+            # self.eventPosL = QLabel()
+            # self.eventPosL.setText("EventPose")
+            # self.eventPosL.move(eventPos)
+            # self.eventPosL.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
+            # self.eventPosL.show()
+
+
+            # self.dragPosL = QLabel()
+            # self.dragPosL.setText("MappedPoint")
+            # self.dragPosL.move(self.pos()+point)
+            # self.dragPosL.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
+            # self.dragPosL.show()
+
+            moveDistance = (eventPos-self.pos()-point)
+            # print(self.grabAngle)
+            # self.move(self.pos()+moveDistance)
+            self._drag_pos = point
+            self._rotationMatrixTranslate = False
 
         #Grab the sprite corresponding to the facing direction and then scale it according to the scaler
         banki = QPixmap(self.dragState[self._facingDirection]).scaled(int(self.ORGINALWIDTH*self._petImageSize), int(self.ORGINALHEIGHT*self._petImageSize))
         
         
-        if ydiff > 0:
-            #If user grabs the upper part of the pet, apply slant effect if the mouse isn't on the center
-            tranformer = QTransform().translate(center[0], center[1]).rotate(grabAngle-90 if xdiff>0 else grabAngle+90).rotate(dTheta)
-        else:
-            #else, apply swing effect only
-            tranformer = QTransform().rotate(dTheta)
-        self.petLabel.setPixmap(banki.transformed(tranformer))
-        tranformer = QTransform()
-        # self.petLabel.setPixmap(banki.transformed(tranformer))
+        transformer = QTransform().rotate(self.grabAngle).rotate(dTheta)
+        self.petLabel.setPixmap(banki.transformed(transformer))
+        # self.petLabel.setPixmap(banki)
+
 
     def _resize(self):
         #get the width&height after resize
