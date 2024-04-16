@@ -62,6 +62,7 @@ class DesktopPet(QWidget):
         self.MARGIN = 250
         #the configuration
         self.SETTING = self._settingMenu.getConfig()
+        self._amplifier = self.SETTING['amplifier']
 
     def _initTrayIcon(self):
         #import prepared trayicon image
@@ -542,13 +543,12 @@ class DesktopPet(QWidget):
 
     def _changeDragAngle(self, dx, eventPos):
         #if the greatest dx can be is 50
-        if dx > 90: dx = 90
-
+        
         #dx is the change in position, i.e.velocity of the cursor
         #Use equation Δθ = (wi)t + (1/2)(a)(t**2) to derive the angle change
         t = 1
         a = -0.5
-        dTheta = dx*t + 0.5*a*(t)**2
+        dTheta = dx*t*self._amplifier + 0.5*a*(t)**2
 
         #Change rotation direction based of facingDirection
         dTheta = -dTheta if self._facingDirection == 0 else dTheta
