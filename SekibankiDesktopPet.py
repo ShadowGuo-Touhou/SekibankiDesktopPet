@@ -551,9 +551,9 @@ class DesktopPet(QWidget):
         dTheta = dx*t + 0.5*a*(t)**2
 
         #Change rotation direction based of facingDirection
-        # dTheta = -dTheta if self._facingDirection == 0 else dTheta
+        dTheta = -dTheta if self._facingDirection == 0 else dTheta
         
-    #simulate the physic effect of pet rotated due to gravity around the grab(pivot) point
+    #simulate the physic effect of pet rotated due to gravity, it is aorund the piovt (where user clicks)
     #Since the grab position doesn't change during the drag, we only need it to run once
         if self._rotationMatrixTranslate:
             #Find the difference in Y from the center of the pet
@@ -615,9 +615,13 @@ class DesktopPet(QWidget):
             #     Topleft translated again = {topLeftTT.x(), topLeftTT.y()}
 
             # """)
-            #Move the rotated topleft by shiftDistance
-            transformer = QTransform().translate(self.size().width()/2, self.size().height()/2).rotate(self.grabAngle).translate(-self.size().width()/2, -self.size().height()/2)
-            point = transformer.map(self._drag_pos)
+
+            #Map the drag_pos to the correspoinding poin in the rotated image. 
+            #First set the center of the rotation to the center of the image, so the mapped point doesn't rotates to another quadrant.
+            #Rotate by the same angle we rotate image. #Update: somehow there is a discrepency if we rotate by the same angle. By adding 15 to the rotation angle solves it...no idea why.
+            #translated the center back to topleft
+            transformer = QTransform().translate(self.size().width()/2, self.size().height()/2).rotate(self.grabAngle+15).translate(-self.size().width()/2, -self.size().height()/2)
+            new_drag_pos = transformer.map(self._drag_pos)
 
             # self.eventPosL = QLabel()
             # self.eventPosL.setText("EventPose")
@@ -628,14 +632,16 @@ class DesktopPet(QWidget):
 
             # self.dragPosL = QLabel()
             # self.dragPosL.setText("MappedPoint")
-            # self.dragPosL.move(self.pos()+point)
+            # self.dragPosL.move(self.pos()+new_drag_pos)
             # self.dragPosL.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
             # self.dragPosL.show()
 
-            moveDistance = (eventPos-self.pos()-point)
+            # moveDistance = (eventPos-self.pos()-new_drag_pos)
             # print(self.grabAngle)
             # self.move(self.pos()+moveDistance)
-            self._drag_pos = point
+
+            #update the coordinate of drag pos
+            self._drag_pos = new_drag_pos
             self._rotationMatrixTranslate = False
 
         #Grab the sprite corresponding to the facing direction and then scale it according to the scaler

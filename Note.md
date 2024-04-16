@@ -72,7 +72,7 @@ The first version - 2024/3/12: added the basic display of desktop pet image and 
     
     As I was developing, I realized that sometimes the rotated image will go out of the boundary of display area, leading to some of it getting corped. I tried to auto adjust the size of the display area, but that messed up the display posiiton of speechbubble... In the end, I had to add an extra layer of margin to the pet, and changed every single lines of code related to movement and scaling....SO FUN.
 
-2024/4/15
+2024/4/13
     I managed to let pet rotate on centering the point where user clicks it. However, once again I don't understand the code I wrote:
 
     1 center = (self.size().width()//2, self.size().height()//2) #Finding the center coordinate of of the pet 
@@ -95,3 +95,47 @@ The first version - 2024/3/12: added the basic display of desktop pet image and 
     Lastly, move translate the image center back to where it should be.
 
     Yet, the thing worked without the translation of the center. Very, very, perplexing.
+
+2024/4/16
+    Got this bastard solved!
+    I tried a different approach during this period: Linear algebra.
+    Since I can't let pet rotate on where the user clicks it, I can shift the point corresponding to the click point to clikc point after rotation. 
+    
+    Say if I know click point A = (233, 233) will shift to B = (114, 514) after rotation, I can shift the whole grahic by a distance of B - A to move B to where A is.
+    This is the basic of translation in linear algebra.
+    To rotate a point, we can use rotation matrix:
+    |cosθ -sinθ|
+    |sinθ  cosθ|
+    And then multiple it to the (x, y) coordinate to be rotated:
+    |cosθ -sinθ| \/ |x| = xcosθ - ysinθ = x'
+    |sinθ  cosθ| /\ |y| = xsinθ + ycosθ = y'
+    (x', y') is the resulting coordinate of rotation. 
+    During rotation, center of rotation is an importation consideration. If the center of rotated shape isn't on the origin, it will be rotated to another quadrant instead by center. So it's necessar to shift the center of the shape to origin before rotation:
+
+        1 shiftDistance = QPoint(self.size().width()//2, self.size().height()//2) + self.pos()
+        2 clickPointT = eventPos - shiftDistance
+        3 xPrime = clickPointT.x()*cos(angle) - clickPointT.y()*sin(angle)
+        4 yPrime = clickPointT.x()*sin(angle) + clickPointT.x()*cos(angle)
+        5 clickPointTR = QPoint(int(xPrime), int(yPrime))
+        6 Find the distance from topleft rotated to it's origin
+        7 shiftDistance2 = eventPos - clickPointTR 
+        8 topLeftTT = topLeftT+shiftDistance2
+        9 self.move(topLeftTT)
+
+    This didn't worked. 
+    The pet was always distant from the cursor, and somethings went off screen.
+    After a long test with controlled variables, I figured out that the problem wasn't with my calculation or linear algebra skill. The root cause was that the rotation to the pet perfomed by QTransformation.rotation(angle) is different form the rotation matrix.
+    In my note two days ago, I wrote that translation didn't matter in rotation. I was wrong. When perform QTransformation.rotation with the default rotation center, the image was actually rotated to another quadrant. Yet, we still got the image displayed. 
+    Image the rectangle displaying image a camera. When imaged being rotated to another quadrant, it follows it to the quadrant. That's why we sill got the desired image without the need to translate the center of rotation. 
+    This change is the 'camera position' is pretty much unpredictible, i.e. I don't know how to, so I needed another way to do it. 
+
+    Luckily, as I swam through stackoverflow threads, I noticed a function called map(). QTransformation.map() takes in an set of coordinate on the origination image, then return the coordinate corresponds to the same point on the transformed image. 
+    The functionality of map() was exactly what I looked for. After all, all I want is that the pet rotated around the point user clicked so that the ration doens't create a gap between cursor and image. 
+    With map(), I can feed in the point cursor clicked and obtain the same point after the rotation. Perfect!
+        1 transformer = QTransform().translate(self.size().width()/2, self.size().height()/2).rotate(self.grabAngle+15).translate(-self.size().width()/2, -self.size().height()/2)
+        2 new_drag_pos = transformer.map(self._drag_pos)
+        3 self._drag_pos = new_drag_pos
+    self._drag_pos recorded the point user clicked. After replacing it with the new coordinate, the image automatically translate to the cursor. 
+
+    A strange thing is, using the same angle, self.grabAngle, used to rotated pet to find new_drag_pos will create a gap between cursor and image. However, by adding 15 to the angle eliminates the gap. 
+    I have no idea why this happens...
