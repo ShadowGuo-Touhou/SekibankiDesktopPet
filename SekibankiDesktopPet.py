@@ -284,6 +284,7 @@ class DesktopPet(QWidget):
             yDestiny = yDestiny//10 * 10
             #Notice that xDestiny and yDestiny can be negative. Since gcf doesn't care about signs, it doesn't matter... why did I even write this down?
             gcf = abs(self.gcd(xDestiny, yDestiny))
+            if gcf == 0: gcf =1
 
             #Create the change value. Since I'll reuse it multiple times, create two variables for them.
             delatX = xDestiny//gcf
