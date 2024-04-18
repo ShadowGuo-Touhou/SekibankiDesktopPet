@@ -175,7 +175,7 @@ class DesktopPet(QWidget):
         self._settingMenu.move(x,y)
 
     def _dialogChanged(self, id):
-        if id in self.DIALOGS.keys() and id != 'clickDialog':
+        if id in self._standByTimers.keys():
             self._standByTimers.pop(id).deleteLater()
         self.DIALOGS = self._settingMenu.getDialog()
         dialog = self.DIALOGS[id]
