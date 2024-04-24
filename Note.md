@@ -139,3 +139,8 @@ The first version - 2024/3/12: added the basic display of desktop pet image and 
 
     A strange thing is, using the same angle, self.grabAngle, used to rotated pet to find new_drag_pos will create a gap between cursor and image. However, by adding 15 to the angle eliminates the gap. 
     I have no idea why this happens...
+
+    2024/4/19
+        The program doesn't work on linux computers with wayland display manager. Wayland doesn't provide a direction api interaction between user and system, so the move() function of QT doesn't work. 
+        There seemed to be work around by directly calling the system to move the window by windowHandle().startSystemMove().
+        However, I cannot retrieve windowHanle with QWidget.window.windowHandle() at all, neither do I find a thread over how to do it. I'm pretty much stuck.
