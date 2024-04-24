@@ -12,7 +12,7 @@ class Bubble(QWidget):
 
     def __init__(self, name):
         super().__init__()
-        self.Name = name       
+        self.Name = name
 
 class SettingMenu(QWidget):
     dialogChanged = pyqtSignal(str)
@@ -53,7 +53,7 @@ class SettingMenu(QWidget):
         except Exception as e:
             print(e)
             self.warning.emit(str(e))
-            self.SETTING = {'start':20, 'end':300, 'language': 0, "clickDialogFrequency": 50, "speechBubbleOpacity": 0.5, "amplifier": 1}
+            self.SETTING = {'start':20, 'end':300, 'language': 0, "clickDialogFrequency": 50, "speechBubbleOpacity": 0.5, "amplifier": 1, "a": -0.5, "t":1}
         #load language, since there ain't really much text, I'll just embed language file in the code.
         if self.SETTING['language'] == 0:
             self.LANGUAGE = {"moveInterval": "Movement Interval:", "to": "to", "seconds": "seconds.", "language": "language",'dialogInterval': 'Dialog Interval:', "illegalInputWarning": "Not gonna work, check your inputs, dummy.", "successfulSave": "Got it. I'll make the change after restart.", "newBubble":"Enter the name for new dialog group:", 'newBubble2': "Enter the content of dialog:", 'deleteBubble': "Confirm deleting", "error": "Error encountered:", "time": "Duration:", "color":"Speechbubble color:", "colorText":"Text Color:",'tooManyClickWarning': "Hey! don't click so many times!\nMy creator didn't handle exceptions properly...", "clickDialogFrequency":"Click dialog display chance:", "speechBubbleOpacity":"Speechbubble opacity: ", "amplifier":"Swing intensity: "}
@@ -274,6 +274,29 @@ class SettingMenu(QWidget):
         swingIntensityLayout.addWidget(self.swingIntensity)
         settingPageLayout.addLayout(swingIntensityLayout)
 
+        #add t
+        tLayout = QHBoxLayout()
+        tLayout.addWidget(QLabel("t value: "))
+        tLayout.addStretch(0)
+        self.t = QLineEdit()
+        self.t.setValidator(QRegularExpressionValidator(QRegularExpression("[1-9]..[0-9][0-9]")))
+        self.t.setText(str(int(self.SETTING['t'])))
+        self.t.setMaximumWidth(50)
+        tLayout.addWidget(self.t)
+        settingPageLayout.addLayout(tLayout)
+
+        #add a
+        aLayout = QHBoxLayout()
+        aLayout.addWidget(QLabel("a value: "))
+        aLayout.addStretch(0)
+        self.a = QLineEdit()
+        self.a.setValidator(QRegularExpressionValidator(QRegularExpression("[-+][0-9]..[0-9][0-9]")))
+        self.a.setText(str(self.SETTING['a']))
+        self.a.setMaximumWidth(50)
+        aLayout.addWidget(self.a)
+        settingPageLayout.addLayout(aLayout)
+
+
         #add language selection
         languageLayout = QHBoxLayout()
         languageLayout.addWidget(QLabel(self.LANGUAGE['language']))
@@ -285,6 +308,7 @@ class SettingMenu(QWidget):
         self.languageChoice.setCurrentIndex(self.SETTING['language'])
         languageLayout.addWidget(self.languageChoice)
         settingPageLayout.addLayout(languageLayout)
+        
 
         #Add a stretch to the layout for spacing
         settingPageLayout.addStretch(1)
@@ -316,10 +340,12 @@ class SettingMenu(QWidget):
         if clickDialogFrequency > 100: clickDialogFrequency = 100
         if speechBubbleOpacity > 100: speechBubbleOpacity = 100
         swingIntensity = int(self.swingIntensity.text())
+        t = float(self.t.text())
+        a = float(self.a.text())
 
         language = self.languageChoice.currentIndex()
         with open('assets/Settings/config.json', 'w+') as s:
-            json.dump({'start': start, 'end': end, 'language': language, 'clickDialogFrequency':clickDialogFrequency, 'speechBubbleOpacity':speechBubbleOpacity/100, "amplifier":swingIntensity}, s)
+            json.dump({'start': start, 'end': end, 'language': language, 'clickDialogFrequency':clickDialogFrequency, 'speechBubbleOpacity':speechBubbleOpacity/100, "amplifier":swingIntensity, "t":t, "a":a}, s)
         #emit signal
         self.warning.emit(self.LANGUAGE['successfulSave'])
         self.quit()

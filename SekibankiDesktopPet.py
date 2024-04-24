@@ -449,6 +449,9 @@ class DesktopPet(QWidget):
 
         self._triggerClickDialog()
 
+        self.thetaLabel = QLabel()
+        self.thetaLabel.show()
+
 
 
         event.accept()
@@ -464,10 +467,13 @@ class DesktopPet(QWidget):
 
     def mouseReleaseEvent(self, event):
         #resume standby phase
-        self._changeFacingDirection(self._facingDirection)
-        self._beginStandbyPhase()
-        self._draging = False
+        if self._draging != False:
+            self._changeFacingDirection(self._facingDirection)
+            self._beginStandbyPhase()
+            self._draging = False
+
         self.setCursor(QCursor(Qt.ArrowCursor))
+        self.thetaLabel.hide()
 
 #Minor Functions-----------------------------------------------------------------------------------------
         
@@ -547,9 +553,7 @@ class DesktopPet(QWidget):
         
         #dx is the change in position, i.e.velocity of the cursor
         #Use equation Δθ = (wi)t + (1/2)(a)(t**2) to derive the angle change
-        t = 1
-        a = -0.5
-        dTheta = dx*t*self._amplifier + 0.5*a*(t)**2
+        dTheta = dx*self.SETTING["t"]*self._amplifier + 0.5*self.SETTING["a"]*(self.SETTING["t"])**2
 
         #Change rotation direction based of facingDirection
         dTheta = -dTheta if self._facingDirection == 0 else dTheta
@@ -624,6 +628,7 @@ class DesktopPet(QWidget):
             transformer = QTransform().translate(self.size().width()/2, self.size().height()/2).rotate(self.grabAngle+15).translate(-self.size().width()/2, -self.size().height()/2)
             new_drag_pos = transformer.map(self._drag_pos)
 
+
             # self.eventPosL = QLabel()
             # self.eventPosL.setText("EventPose")
             # self.eventPosL.move(eventPos)
@@ -653,6 +658,8 @@ class DesktopPet(QWidget):
         self.petLabel.setPixmap(banki.transformed(transformer))
         # self.petLabel.setPixmap(banki)
 
+        self.thetaLabel.setText(str(dTheta))
+        print(dTheta)
 
     def _resize(self):
         #get the width&height after resize
