@@ -47,13 +47,14 @@ class DesktopPet(QWidget):
         #the facing state of pet: 0 is facing right, 1 is facing left
         self.__facingDirection = None
         #The array containing the states for desktopPet
-        self.normalStates = [r"assets\Sprite\normalRIght.gif", r"assets\Sprite\normalLeft.gif"]
-        self.dragState = [r"assets\Sprite\dragRIght.png", r"assets\Sprite\dragLeft.png"]
+        self.normalStates = [r"assets/Sprite/normalRIght.gif", r"assets/Sprite/normalLeft.gif"]
+        self.dragState = [r"assets/Sprite/dragRight.png", r"assets/Sprite/dragLeft.png"]
+        print(os.path.isfile(os.getcwd()+self.dragState[0]), os.getcwd()+self.normalStates[0])
         #Condition to see if the pet is talking
         self._speechBubbleCondition = False
         self._draggable = True
         #The scale of gif
-        self._petImageSize = 1
+        self._petImageSize = 0.8
         #Constants
         self.WINDOWWIDTH = QApplication.primaryScreen().size().width()
         self.WINDOWHEIGHT = QApplication.primaryScreen().size().height()
