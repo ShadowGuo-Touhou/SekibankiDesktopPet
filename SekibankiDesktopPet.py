@@ -49,7 +49,6 @@ class DesktopPet(QWidget):
         #The array containing the states for desktopPet
         self.normalStates = [r"assets/Sprite/normalRIght.gif", r"assets/Sprite/normalLeft.gif"]
         self.dragState = [r"assets/Sprite/dragRight.png", r"assets/Sprite/dragLeft.png"]
-        print(os.path.isfile(os.getcwd()+self.dragState[0]), os.getcwd()+self.normalStates[0])
         #Condition to see if the pet is talking
         self._speechBubbleCondition = False
         self._draggable = True
