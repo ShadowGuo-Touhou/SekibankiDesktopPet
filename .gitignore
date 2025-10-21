@@ -1,0 +1,8 @@
+Testfile.py
+__pycache__/
+assets/Dialogs/Standby.json
+build/
+dist/
+main.spec
+assets/Dialogs/clickDialog.json
+assets/Settings/config.json
