@@ -126,8 +126,8 @@ The first version - 2024/3/12: added the basic display of desktop pet image and 
     The pet was always distant from the cursor, and somethings went off screen.
     After a long test with controlled variables, I figured out that the problem wasn't with my calculation or linear algebra skill. The root cause was that the rotation to the pet perfomed by QTransformation.rotation(angle) is different form the rotation matrix.
     In my note two days ago, I wrote that translation didn't matter in rotation. I was wrong. When perform QTransformation.rotation with the default rotation center, the image was actually rotated to another quadrant. Yet, we still got the image displayed. 
-    Image the rectangle displaying image a camera. When imaged being rotated to another quadrant, it follows it to the quadrant. That's why we sill got the desired image without the need to translate the center of rotation. 
-    This change is the 'camera position' is pretty much unpredictible, i.e. I don't know how to, so I needed another way to do it. 
+    Image the rectangle displaying image a camera. When imaged being rotated to another quadrant, it follows it to the quadrant. That's why we sill got the desired image without the need to translate the center of rotation.
+    This change is the 'camera position' is pretty much unpredictible, i.e. I don't know how to, so I needed another way to do it.
 
     Luckily, as I swam through stackoverflow threads, I noticed a function called map(). QTransformation.map() takes in an set of coordinate on the origination image, then return the coordinate corresponds to the same point on the transformed image. 
     The functionality of map() was exactly what I looked for. After all, all I want is that the pet rotated around the point user clicked so that the ration doens't create a gap between cursor and image. 
@@ -147,3 +147,11 @@ The first version - 2024/3/12: added the basic display of desktop pet image and 
 
 2025/10/12
     Redrew the appearence of Sekibanki, and made the UI a mainwindow, so Stream software could capture it.
+
+2026/10/12
+    I wanted deepseek to polish the animation of the Sekibanki desktop pet, but the big fat whale spent half a day going in circles on coordinate math just to verify where the pivot was for herself. Note for the future: she only writes and inspects code, the animation is my job.
+
+    (Two code problems she dug up along the way, both fixed, on the sekibanki_deepseek branch:)
+    1. mouseReleaseEvent called _changeFacingDirection() unconditionally, and that method built a new QMovie and setMovie() every single time, which reset the animation to frame 0. That's why the gif twitched on every click. Now the movies are cached per facing direction, setMovie() only runs on a real direction change, and start() only runs when the animation is stopped.
+    2. Quitting while a speech bubble was still up let the bubble thread touch the already deleted window and the process crashed outright. Added shutdown(): stop the timers, set a stop flag for the workers, then wait for the threads to leave.
+    Also: renamed the script from .pyw to .py so tools can inspect it, and added tests/test_click_behavior.py with 5 cases. She also "fixed" the drag facing check, but that one was her misreading the mirrored drag sprites, so it has been reverted. For the record: she is not to touch that line again.

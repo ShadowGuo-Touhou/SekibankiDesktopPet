@@ -53,6 +53,8 @@ class DesktopPet(QWidget):
         #Condition to see if the pet is talking
         self._speechBubbleCondition = False
         self._draggable = True
+        #Whether the pet was actually moved since the left button went down. A plain click never enters drag state.
+        self._dragged = False
         #The scale of gif
         self._petImageSize = 0.8
         #Constants
@@ -61,6 +63,14 @@ class DesktopPet(QWidget):
         self.ORGINALWIDTH = 549
         self.ORGINALHEIGHT = 549
         self.MARGIN = 250
+        #Cache one QMovie per facing direction. Creating a QMovie restarts its animation from frame 0,
+        #which made the pet twitch on every click, so each movie is built once here and kept alive.
+        self._petImages = []
+        for state in self.normalStates:
+            movie = QMovie(state)
+            movie.setCacheMode(QMovie.CacheAll)
+            movie.setScaledSize(QSize(int(self.ORGINALWIDTH*self._petImageSize), int(self.ORGINALHEIGHT*self._petImageSize)))
+            self._petImages.append(movie)
         #the configuration
         self.SETTING = self._settingMenu.getConfig()
         self._amplifier = self.SETTING['amplifier']
@@ -218,7 +228,7 @@ class DesktopPet(QWidget):
 
     #the function for wandering, becauses it involves a loop that can't be put in the main loop, we need another thread for it
     def _wandering(self):
-        #create a thread to run subprocess
+        #Create a thread to run subprocess
         self._wanderingThread = QThread(parent=self)
         #create the wandering class and pass in self(DesktopPet)
         self._wanderingWork = self._WanderingWork(self, 300*(self._petImageSize*2-1))
@@ -259,6 +269,11 @@ class DesktopPet(QWidget):
             self.mainWindow = mw
             self.mr = int(mr)
             self.margin = int(mw.MARGIN*mw._petImageSize/2)
+            #set when the pet is shutting down, so the loop stops touching a dying window
+            self._stopRequested = False
+
+        def requestStop(self):
+            self._stopRequested = True
 
         def run(self):
             #The range of movement distance is movementrange "mr" pixel to both side
@@ -303,6 +318,9 @@ class DesktopPet(QWidget):
             x = self.mainWindow.pos().x()
             y = self.mainWindow.pos().y()
             for i in range(gcf):
+                #leave immediately if the pet is quitting, the window may already be gone
+                if self._stopRequested:
+                    break
                 # send back the coordinate in a list with vector
                 self.moveSignal.emit([x + delatX*i, y + delatY*i])
                 #30 fps
@@ -407,29 +425,40 @@ class DesktopPet(QWidget):
             self.speechBubble = sb
             #the display period of speech bubble
             self.time2Live = T2T
-            
+            #set when the pet is shutting down, so the loop stops touching a dying window
+            self._stopRequested = False
+
+        def requestStop(self):
+            self._stopRequested = True
+
         def run(self):
             #Get the size of the screen
             screenWidth = QDesktopWidget().screenGeometry(0).width()
             selfWidth = self.speechBubble.width()
             selfHight = self.speechBubble.height()
-            for i in range( int(self.time2Live*30) ):
-                mainPos = self.mainWindow.pos()
-                mainWidth = self.mainWindow.size().width()
-                mainHeight = self.mainWindow.size().height()
-                xPos = mainPos.x() + mainWidth//2 - selfWidth//2
-                yPos = mainPos.y() - selfHight + self.mainWindow.MARGIN*self.mainWindow._petImageSize//2
+            try:
+                for i in range( int(self.time2Live*30) ):
+                    #leave immediately if the pet is quitting, the window may already be gone
+                    if self._stopRequested:
+                        return
+                    mainPos = self.mainWindow.pos()
+                    mainWidth = self.mainWindow.size().width()
+                    mainHeight = self.mainWindow.size().height()
+                    xPos = mainPos.x() + mainWidth//2 - selfWidth//2
+                    yPos = mainPos.y() - selfHight + self.mainWindow.MARGIN*self.mainWindow._petImageSize//2
 
-                #prevent the speech bubble from going off screen
-                if xPos < 0: xPos = 0
-                elif xPos+selfWidth>screenWidth: xPos = screenWidth - selfWidth
-                #If the space above desktop isn't enought, move the speech bubble down
-                if yPos < 0: yPos = mainPos.y() + mainHeight - self.mainWindow.MARGIN*self.mainWindow._petImageSize//2
+                    #prevent the speech bubble from going off screen
+                    if xPos < 0: xPos = 0
+                    elif xPos+selfWidth>screenWidth: xPos = screenWidth - selfWidth
+                    #If the space above desktop isn't enought, move the speech bubble down
+                    if yPos < 0: yPos = mainPos.y() + mainHeight - self.mainWindow.MARGIN*self.mainWindow._petImageSize//2
 
-                self.move.emit([int(xPos), int(yPos)])
-                #FPS
-                time.sleep(1/30)
-            self.finished.emit()
+                    self.move.emit([int(xPos), int(yPos)])
+                    #FPS
+                    time.sleep(1/30)
+            finally:
+                #always report completion, otherwise the thread is never quit and the bubble stays locked
+                self.finished.emit()
     
     def _speechBubbleConditionChange(self):
         self._speechBubbleCondition = not self._speechBubbleCondition 
@@ -468,18 +497,44 @@ class DesktopPet(QWidget):
         event.accept()
 
     def mouseReleaseEvent(self, event):
+        #only restore the standing gif when the pet was actually dragged, otherwise a plain click
+        #would interrupt the animation that is already playing
+        if self._draging and self._dragged:
+            self._changeFacingDirection(self._facingDirection)
         #resume standby phase
-        self._changeFacingDirection(self._facingDirection)
         self._beginStandbyPhase()
         self._draging = False
+        self._dragged = False
         self.setCursor(QCursor(Qt.ArrowCursor))
 
 #Minor Functions-----------------------------------------------------------------------------------------
         
     #Quit the desktop pet
     def quit(self):
+        self.shutdown()
         self.close()
-        sys.exit()
+        QApplication.instance().quit()
+
+    #Stop every background worker before the window goes away.
+    #Without this, a speech bubble or wander loop keeps touching the already deleted window
+    #("wrapped C/C++ object of type DesktopPet has been deleted"), which aborts the process on exit.
+    def shutdown(self):
+        #stop the standby timers first so no new worker is spawned while we are tearing down
+        self._quitStandbyPhase()
+        if getattr(self, "petImage", None) is not None:
+            self.petImage.stop()
+
+        #ask the workers to leave their loops, then wait for their threads
+        for threadName, workName in (("_wanderingThread", "_wanderingWork"), ("_speechBubbleThread", "_speechBubbleWork")):
+            thread = getattr(self, threadName, None)
+            work = getattr(self, workName, None)
+            if work is not None:
+                work.requestStop()
+            if thread is not None and thread.isRunning():
+                thread.quit()
+                thread.wait(2000)
+        if getattr(self, "_speechBubble", None) is not None:
+            self._speechBubble.close()
 
     #Display or hide the desktop pet depending on the current state
     def display(self):
@@ -496,6 +551,8 @@ class DesktopPet(QWidget):
     
     #This function decides the type of movement desktoppet is experiencing.
     def _petDragMovement(self, eventPos:int, ) -> None:
+        #a real drag happened, so the release handler has to restore the normal gif
+        self._dragged = True
         #decide the current facing direction by mius
         facingDirection = self._previous_drag_pos.x() - eventPos.x()
         #Grab the change in position
@@ -538,14 +595,16 @@ class DesktopPet(QWidget):
     def _changeFacingDirection(self, facingDirection):
         #"self.normalStates" is an array where 0 is the gif of facing right, 1 is the gif of facing left
         self._facingDirection = facingDirection
-        #load the gif into petImage
-        self.petImage = QMovie(self.normalStates[self._facingDirection])
-        #load petImage into petLabel
-        self.petLabel.setMovie(self.petImage)
-        #call resize to rescale gif if apply
-        self._resize()
-        #begin to play the gif
-        self.petImage.start()
+        #reuse the cached movie for this direction instead of building a new one
+        self.petImage = self._petImages[self._facingDirection]
+        if self.petLabel.movie() is not self.petImage:
+            #load petImage into petLabel
+            self.petLabel.setMovie(self.petImage)
+            #call resize to rescale gif if apply
+            self._resize()
+        #only (re)start a stopped animation, so a click can't rewind the gif to frame 0
+        if self.petImage.state() != QMovie.Running:
+            self.petImage.start()
 
     def _changeDragAngle(self, dx, eventPos):
         #if the greatest dx can be is 50
