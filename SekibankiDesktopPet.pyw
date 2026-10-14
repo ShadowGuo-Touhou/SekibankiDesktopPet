@@ -570,6 +570,7 @@ class DesktopPet(QWidget):
         #would interrupt the animation that is already playing
         if self._draging and self._dragged:
             self._changeFacingDirection(self._facingDirection)
+            self.repaint()
         #resume standby phase
         self._beginStandbyPhase()
         self._draging = False
@@ -578,12 +579,21 @@ class DesktopPet(QWidget):
 
 #Minor Functions-----------------------------------------------------------------------------------------
         
+# Quit Functions (Proposed by deepseek) ----------------------------------------------------------------------------------
     #Quit the desktop pet
     def quit(self):
         self.shutdown()
         self.close()
         QApplication.instance().quit()
 
+    def _check_if_Qt_object_is_already_deleted(self, fn):
+        '''call fn, if the object contained is already deleted, skip'''
+        try:
+            return fn()
+        except RuntimeError:
+            pass
+
+    # Why the hell did deepseek added this part when I only requested her to reorganize my code structure??
     #Stop every background worker before the window goes away.
     #Without this, a speech bubble or wander loop keeps touching the already deleted window
     #("wrapped C/C++ object of type DesktopPet has been deleted"), which aborts the process on exit.
@@ -591,7 +601,8 @@ class DesktopPet(QWidget):
         #stop the standby timers first so no new worker is spawned while we are tearing down
         self._quitStandbyPhase()
         if getattr(self, "petImage", None) is not None:
-            self.petImage.stop()
+
+            self._check_if_Qt_object_is_already_deleted(self.petImage.stop)
 
         #ask the workers to leave their loops, then wait for their threads
         for threadName, workName in (("_wanderingThread", "_wanderingWork"), ("_speechBubbleThread", "_speechBubbleWork")):
@@ -599,11 +610,14 @@ class DesktopPet(QWidget):
             work = getattr(self, workName, None)
             if work is not None:
                 work.requestStop()
-            if thread is not None and thread.isRunning():
-                thread.quit()
-                thread.wait(2000)
+            if thread is not None:
+                self._check_if_Qt_object_is_already_deleted(thread.quit)
+                self._check_if_Qt_object_is_already_deleted(lambda: thread.wait(2000))
+
         if getattr(self, "_speechBubble", None) is not None:
-            self._speechBubble.close()
+            self._check_if_Qt_object_is_already_deleted(self._speechBubble.close)
+
+
 
     #Display or hide the desktop pet depending on the current state
     def display(self):

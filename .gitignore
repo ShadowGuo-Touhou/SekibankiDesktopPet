@@ -6,3 +6,5 @@ dist/
 main.spec
 assets/Dialogs/clickDialog.json
 assets/Settings/config.json
+.vscode/
+_baseline_api.txt
