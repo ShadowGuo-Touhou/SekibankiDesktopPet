@@ -154,6 +154,10 @@ def test_shutdown_with_active_bubble(app, pet):
     """用例 5：气泡还在显示时退出，必须干净收尾（否则后台线程访问已销毁窗口）。"""
     center = QPoint(pet.width() // 2, pet.height() // 2)
 
+    # 点击对话数据来自本地 assets/Dialogs/clickDialog.json，那是用户文件且被 gitignore，
+    # clone 后可能是空的，所以这里自带一份，让用例不依赖它。
+    pet.DIALOGS['clickDialog']['dialog'] = ["test"]
+
     press(pet, center)
     release(pet, center)
     app.processEvents()
