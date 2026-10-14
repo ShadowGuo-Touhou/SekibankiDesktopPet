@@ -45,27 +45,89 @@ class DesktopPet(QWidget):
         self.update()
 
         #List of conditions and pre-defined variables
-        #the facing state of pet: 0 is facing right, 1 is facing left
-        self.__facingDirection = None
-        #The array containing the states for desktopPet
+
+        #-- assets ------------------------------------------------------------------
+        #Pictures the pet uses, indexed by facing direction (0 = right, 1 = left)
         self.normalStates = [r"assets/Sprite/normalRIght.gif", r"assets/Sprite/normalLeft.gif"]
         self.dragState = [r"assets/Sprite/dragRight.png", r"assets/Sprite/dragLeft.png"]
-        #Condition to see if the pet is talking
-        self._speechBubbleCondition = False
-        self._draggable = True
-        #Whether the pet was actually moved since the left button went down. A plain click never enters drag state.
-        self._dragged = False
-        #The scale of gif
-        self._petImageSize = 0.8
-        #Constants
+        #The label that actually draws the pet, filled in by _initPetImage
+        self.petLabel = None
+        #Standing animation cache, one QMovie per direction, built further down.
+        #Creating a QMovie restarts its animation from frame 0, which made the pet twitch on
+        #every click, so each movie is built once and kept alive.
+        self._petImages = []
+        #The movie currently shown. It points at one of _petImages and only exists once a
+        #direction has been chosen, so treat it as optional.
+        self.petImage = None
+
+        #-- geometry constants ------------------------------------------------------
         self.WINDOWWIDTH = QApplication.primaryScreen().size().width()
         self.WINDOWHEIGHT = QApplication.primaryScreen().size().height()
         self.ORGINALWIDTH = 549
         self.ORGINALHEIGHT = 549
+        #Blank border kept around the pet so a rotated or enlarged sprite is not clipped
         self.MARGIN = 250
-        #Cache one QMovie per facing direction. Creating a QMovie restarts its animation from frame 0,
-        #which made the pet twitch on every click, so each movie is built once here and kept alive.
-        self._petImages = []
+        #Scale of the standing gif and of the drag sprite
+        self._petImageSize = 0.8
+
+        #-- interaction state -------------------------------------------------------
+        #0 is facing right, 1 is facing left. It only carries a value during a drag.
+        self._facingDirection = 0
+        #Left button is currently held on the pet
+        self._draging = False
+        #The pet was actually moved since the button went down; a plain click never drags
+        self._dragged = False
+        #Where the pet was grabbed, in window coordinates. _changeDragAngle rewrites this once
+        #per drag so the grabbed point follows the cursor while the sprite rotates.
+        self._drag_pos = None
+        #Cursor position of the previous move event, used to derive the drag speed
+        self._previous_drag_pos = None
+        #Whether the pivot angle of the current grab has been worked out yet
+        self._rotationMatrixTranslate = True
+        #Angle the pet hangs by, derived from where it was grabbed. Created on the first drag.
+        self.grabAngle = None
+        #Closed while the setting menu is open, so dragging cannot fight the menu
+        self._draggable = True
+
+        #-- configuration -----------------------------------------------------------
+        #Copied out of config.json by SettingMenu.getConfig()
+        self.SETTING = None
+        #The "Swing intensity" setting, used for the pendulum swing of a drag
+        self._amplifier = None
+
+        #-- dialogs -----------------------------------------------------------------
+        #DIALOGS and _clickDialogExist are set by _initSettingMenu, which __init__ calls before
+        #this method, so they must not be given defaults here: doing so wipes the real values.
+        #One timer per dialog group; a group fires _speechBubbling at a random interval
+        self._standByTimers = {}
+
+        #-- speech bubble -----------------------------------------------------------
+        #True while a bubble is on screen, so a second one cannot be started
+        self._speechBubbleCondition = False
+        #The bubble widget and its worker pair; all three are rebuilt per bubble
+        self._speechBubble = None
+        self._speechBubbleWork = None
+        self._speechBubbleThread = None
+
+        #-- wandering ---------------------------------------------------------------
+        #Fires after the configured interval and sends the pet on a trip
+        self._wanderingTimer = None
+        #The worker and its thread, both rebuilt on every trip
+        self._wanderingWork = None
+        self._wanderingThread = None
+
+        #-- setting menu ------------------------------------------------------------
+        #The menu itself is built by _initSettingMenu before this method runs, so it gets no
+        #default here. The dialog data it owns is the shared DIALOGS dict.
+
+        #-- tray --------------------------------------------------------------------
+        self._tray_menu = None
+        self._tray_icon_menu = None
+
+        #Legacy field, never read: the live value is _facingDirection
+        self.__facingDirection = None
+
+        #Cache one QMovie per facing direction
         for state in self.normalStates:
             movie = QMovie(state)
             movie.setCacheMode(QMovie.CacheAll)
@@ -146,9 +208,16 @@ class DesktopPet(QWidget):
     
     #initialize settings
     def _initSettingMenu(self):
+        #__init__ calls this before _init, so the two fields below are born here and must not be
+        #given defaults in _init afterwards, or the real values would be wiped.
+        #The menu window itself
         self._settingMenu = SettingMenu()
+        #Whether the dialogs contain a clickDialog group
+        self._clickDialogExist = False
+
         self._settingMenu.finished.connect(self._SettingMenuClose)
         self._settingMenu.warning.connect(lambda x: self._speechBubbling(x))
+        #Every dialog group, handed over as the shared dict rather than copied
         self.DIALOGS = self._settingMenu.getDialog()
         if 'clickDialog' in self.DIALOGS:
             self._clickDialogExist = True
