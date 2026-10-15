@@ -6,6 +6,7 @@ from PyQt5.QtGui import QPainter
 from PyQt5.QtWidgets import *
 from SettingBox import SettingMenu
 from math import pi, atan,atan2, cos, sin, radians
+from PhysicalModule import MousePhysic
 #Inspired by: https://zhuanlan.zhihu.com/p/521580516
 
 class DesktopPet(QWidget):
@@ -91,20 +92,22 @@ class DesktopPet(QWidget):
 
         #-- Animation config --------------------------------------------------------
         #This is the frame rate of dragging animation update
-        self._frame_rate = 1/60
+        self._frame_rate = 1/80
         #This is the time of last frame detection, used to detect time lapse 
         self._last_tick = None
         #Accumulated time lapse, used for detect if a frame should be updated
         self._accumulator = 0
         #How many frames has passed since pressed
         self._frame_count = 0
+        # physical module for dragging
+        self._physical_module = None
 
         #-- Pressing Config ---------------------------------------------------------
         #This category is used to detect if mouse is continuelly pressing. Somehow PyQT5 doesn't come with a innate event checker, fuck it.
         self._pressTimer = QTimer(self)
         self._pressTimer.setTimerType(Qt.PreciseTimer)
         # QTimer works in miliseconds
-        self._pressTimer.setInterval(1000 // 60) 
+        self._pressTimer.setInterval(int(self._frame_rate*1000))
         # Time out event triggers tick detection
         self._pressTimer.timeout.connect(self._frame_has_passed)
 
@@ -198,7 +201,6 @@ class DesktopPet(QWidget):
         def timerEvent(self, a0: QTimerEvent | None) -> None:
             self.setInterval(random.randint(self.startI, self.endI))
             self.timeout.emit(self.id)
-            # print(f'{self.id} timeout')
             return super().timerEvent(a0)
         
         def __str__(self) -> str:
@@ -558,16 +560,15 @@ class DesktopPet(QWidget):
         self._quitStandbyPhase()
         #Flag for pet transformation
         self._rotationMatrixTranslate = True
-        self._frame_counter_start()
+        
 
         #Enter drag event if mouse pressed is left button
         if event.button() == Qt.LeftButton and self._draggable:
-            self._draging = True
+            self._frame_counter_start()
             #adjust anchor of movement position
             self._drag_pos = event.globalPos() - self.pos()
             self._previous_drag_pos = event.globalPos()
             #Initiate frame rate calculation
-            
         else:
             self._draging = False
             self._SettingMenuOpen()
@@ -683,20 +684,25 @@ class DesktopPet(QWidget):
             # Return true if a frame has indeed changed
             self._accumulator -= self._frame_rate
             self._frame_count += 1
+            if self._frame_count == 5:
+                self._draging = True
+                self._dragged = True
+                self._physical_module = MousePhysic(QCursor.pos())
+            if self._draging:
+                # Grant pet physic effect
+                self._petDraggedMove()
 
-            return True
-        
+        return True
 
-    #This function decides the type of movement desktoppet is experiencing.
-    def _petDragMovement(self, eventPos:int) -> None:
-        #a real drag happened, so the release handler has to restore the normal gif
-        self._dragged = True
-
-        #Grab the change in position
+    def _petDraggedMove(self) -> None:
+        '''Moving Pet alone with the cursor'''
+                #Grab the change in position
+        eventPos = QCursor.pos()
         dx = abs(self._FacingDirectionUpdate(eventPos))
-
-
-
+        self._physical_module._update(eventPos)
+        print(f'cursor position: {eventPos.x()}, {eventPos.y()}')
+        print(f'window posiiton: {self.pos().x()}, {self.pos().y()}')
+        print(f'drag position: {self._drag_pos.x()}, {self._drag_pos.y()}')
 
         #Margin
         margin = self.MARGIN * self._petImageSize //2
@@ -715,6 +721,13 @@ class DesktopPet(QWidget):
         elif yPos > self.WINDOWHEIGHT - self.height() + margin: yPos = self.WINDOWHEIGHT - self.height() + margin
 
         self.move(int(xPos), int(yPos))
+
+
+    #This function decides the type of movement desktoppet is experiencing.
+    def _petDragMovement(self, eventPos:int) -> None:
+        #a real drag happened, so the release handler has to restore the normal gif
+        pass
+
 
     #Standby phase is when there isn't any user interaction with desktop pet. 
     #During standby phase, QTimers will kick for standby behaviors and speech bubbles, but they might leads to undertermined behavior if executed during user interactions. So, they have to paused.
