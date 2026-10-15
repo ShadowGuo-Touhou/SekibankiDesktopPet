@@ -97,6 +97,11 @@ class DesktopPet(QWidget):
             self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
         # self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
 
+        #The window has no title bar, so nothing draws this text. It is what the taskbar
+        #hover tip, Alt+Tab and the OBS window list read though, which is the whole point:
+        #with showInTaskbar off this window is a SubWindow and appears in none of them.
+        self.setWindowTitle("赤蛮奇")
+
         #Don't fill window with background color
         self.setAutoFillBackground(False)
         #Set window transparent
@@ -448,6 +453,13 @@ class DesktopPet(QWidget):
 
     #the function for wandering, becauses it involves a loop that can't be put in the main loop, we need another thread for it
     def _wandering(self):
+        #A wander must never start while the user is holding the pet: the two would fight
+        #over the window position and she would jitter between the wander path and the
+        #cursor. mousePressEvent interrupts a wander that is already running; this guard
+        #covers the one case that leaves, a timer that had already been queued when the
+        #press arrived.
+        if self._pressTimer.isActive():
+            return
         #Create a thread to run subprocess
         self._wanderingThread = QThread(parent=self)
         #create the wandering class and pass in self(DesktopPet)
@@ -560,7 +572,29 @@ class DesktopPet(QWidget):
             return a
 
     def _wanderIngTimerReset(self):
+        #Never re-arm while the user is holding the pet. This also runs when an interrupted
+        #wander finishes, and that happens WHILE the drag is going on - without this guard a
+        #fresh wander would fire in the middle of one, which is the bug this all fixes.
+        #The interval set the last time is kept, so _beginStandbyPhase can just start() it.
+        if self._pressTimer.isActive():
+            return
         self._wanderingTimer.start(random.randint(self.SETTING['start'], self.SETTING['end'])*1000)
+
+    def _interruptWandering(self):
+        '''Cut short a wander that is already under way, and wait for it to leave.
+
+        Stopping the standby timers is not enough: a wander that had already started keeps
+        emitting move signals at 30 fps, so it goes on dragging the window out from under the
+        cursor. requestStop makes the loop leave after at most one tick; the wait matters
+        because a move that lands after the drag has taken the window would displace it.
+        '''
+        work = getattr(self, "_wanderingWork", None)
+        if work is None:
+            return
+        self._check_if_Qt_object_is_already_deleted(work.requestStop)
+        thread = getattr(self, "_wanderingThread", None)
+        if thread is not None:
+            self._check_if_Qt_object_is_already_deleted(lambda: thread.wait(500))
     
     def _speechBubbling(self, text=None, id = None):
         #Don't creat new window if there is one already
@@ -845,6 +879,10 @@ class DesktopPet(QWidget):
             return
         #Quite standby phase, lest undetermined behavior
         self._quitStandbyPhase()
+        #...and cut short a wander that is ALREADY in flight. Killing the timer is not
+        #enough: the worker thread would go on moving the window at 30 fps while the drag
+        #moves it too, and the pet would jitter between the two.
+        self._interruptWandering()
         #Flag for pet transformation
         self._rotationMatrixTranslate = True
         
