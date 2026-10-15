@@ -13,6 +13,21 @@ try:
     import winsound
 except ImportError:
     winsound = None
+
+#Windows identifies taskbar buttons by AppUserModelID, not by window. Left alone, every window
+#hosted by pythonw.exe lands in one group named after pythonw itself, and the taskbar BUTTON
+#keeps pythonw's icon no matter what setWindowIcon() puts on the window (the window icon only
+#reaches the title bar, Alt+Tab and the hover card). Naming this process explicitly makes
+#Windows treat the pet as its own application, and the button then falls back to the window
+#icon - the ico. It has to happen before any UI exists, which is why it sits at module level:
+#Microsoft, on SetCurrentProcessExplicitAppUserModelID: "must be called during an application's
+#initial startup routine before the application presents any UI". The id is part of the app's
+#identity - changing it later makes Windows see a different application and drops pinned items.
+try:
+    import ctypes
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Sekibanki.DesktopPet")
+except Exception:
+    pass
 #Inspired by: https://zhuanlan.zhihu.com/p/521580516
 
 #Where the sound effects live. Derived from this file's own location rather than from the
@@ -101,6 +116,11 @@ class DesktopPet(QWidget):
         #hover tip, Alt+Tab and the OBS window list read though, which is the whole point:
         #with showInTaskbar off this window is a SubWindow and appears in none of them.
         self.setWindowTitle("赤蛮奇")
+        #Window icon, same file the tray icon uses. Without this the window has no icon of
+        #its own, so Windows falls back to the interpreter's (the python/pythonw logo) for
+        #the taskbar button and Alt+Tab. The ico only carries a 16x16 frame, so the taskbar
+        #upscales it to 32x32 and above - it reads, but it is soft.
+        self.setWindowIcon(QIcon(os.path.join('assets/icon.ico')))
 
         #Don't fill window with background color
         self.setAutoFillBackground(False)
