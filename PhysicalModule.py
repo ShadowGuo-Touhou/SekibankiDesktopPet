@@ -1,3 +1,5 @@
+import math
+
 from PyQt5.QtGui import QCursor
 from PyQt5.QtCore import QPoint
 
@@ -41,6 +43,109 @@ class MousePhysic():
         self._prev_vx, self._prev_vy = self._vx, self._vy
 
         return (self._vx, self._vy, self._ax, self._ay)
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  拖拽摆动：绕抓取点的阻尼单摆
+# ══════════════════════════════════════════════════════════════════════
+# 这组参数是仿真里选定的「C 速度扶正」预设，实测：
+#   跟手 23.8° / 抗抖 5.0° / 信噪比 4.8   （原始公式是 19.9° / 8.8° / 2.2）
+SWING_G     = 6400.0   # 重力 px/s² —— 80Hz 下「1 像素/帧²」正好等于 6400
+SWING_ZETA  = 0.35     # 阻尼比
+SWING_KV    = 3.0      # 速度通道增益 1/s：匀速拖动也有恒定后仰，atan(kv*v/g)
+SWING_KA    = 0.4      # 加速度通道增益
+SWING_TAU   = 0.05     # 速度低通时间常数 s
+SWING_TAU_A = 0.10     # 加速度低通时间常数 s —— 压掉手抖和差分噪声
+SWING_MIN_R = 40.0     # 摆长下限：抓到贴图正中心时 r→0 会让 ω₀ 爆炸
+
+
+class DragSwing:
+    '''拖拽期间绕抓取点转的阻尼单摆。
+
+    角度方程，θ 单位为弧度，θ=0 表示「从抓取点垂下」：
+
+        θ'' = -(g/r)·sinθ - 2ζω₀·θ' - (ka·ax·cosθ - ka·ay·sinθ + kv·vx·cosθ - kv·vy·sinθ)/r
+
+    θ 的初值取 -grabAngle，于是渲染角 (grabAngle + θ) 在 t=0 时正好是 0：
+    贴图保持被你抓住时的姿态，之后重力把 θ 拉回 0，宠物就「转下去」了。
+
+    整个东西按固定 dt 推进（项目里是 1/80），所以手感只取决于时间，不取决于
+    鼠标事件有多密 —— 这正是它取代「dTheta = dx * amplifier」那套按每帧位移算
+    角度的公式的原因：老公式在 125Hz 和 1000Hz 的设备上差了一百多倍。
+
+    r 是抓取点到贴图中心的距离，也就是摆长。
+    '''
+
+    def __init__(self, grabLocal, spriteSize, grabAngleDeg,
+                 g=SWING_G, zeta=SWING_ZETA, kv=SWING_KV, ka=SWING_KA,
+                 tau=SWING_TAU, tau_a=SWING_TAU_A):
+        spriteWidth, spriteHeight = spriteSize
+        #摆长：抓取点到贴图中心。贴图中心才是质心，窗口中心（含 MARGIN）不是
+        self.r = max(math.hypot(-(spriteWidth/2.0 - grabLocal[0]),
+                                spriteHeight/2.0 - grabLocal[1]), SWING_MIN_R)
+        self.omega0 = math.sqrt(g / self.r)
+        self.zeta, self.kv, self.ka = zeta, kv, ka
+        self.tau, self.tau_a = tau, tau_a
+        #t=0 时渲染角为 0，也就是保持被抓住的姿态
+        self.theta = -math.radians(grabAngleDeg)
+        self.omega = 0.0
+
+        #光标信号链：位置 →低通(τ)→ 速度 →差分→ 加速度 →低通(τ_a)→ 输出
+        self._px = self._py = None
+        self._vx = self._vy = 0.0
+        self._ax = self._ay = 0.0
+        self._prev_vx = self._prev_vy = 0.0
+        self._seeded = False
+        self._samples = 0
+
+    def step(self, cursorPos, dt):
+        '''推进一帧，返回「在 grabAngle 之上还要再转多少度」。'''
+        self._sample(cursorPos.x(), cursorPos.y(), dt)
+
+        #两个通道叠加后投影到摆的切线方向
+        effectiveX = self.ka*self._ax + self.kv*self._vx
+        effectiveY = self.ka*self._ay + self.kv*self._vy
+        drive = -(effectiveX*math.cos(self.theta) - effectiveY*math.sin(self.theta)) / self.r
+        alpha = (-(self.omega0 ** 2) * math.sin(self.theta)     #重力回复
+                 - 2.0 * self.zeta * self.omega0 * self.omega   #阻尼
+                 + drive)
+        self.omega += alpha * dt        #先更新角速度
+        self.theta += self.omega * dt   #再更新角度（半隐式欧拉，比显式稳）
+        return math.degrees(self.theta)
+
+    def _sample(self, x, y, dt):
+        '''从整数像素坐标重建光标速度和加速度，每一环都在抗噪。'''
+        if self._px is None:
+            #第一个样本：只记位置
+            self._px, self._py = x, y
+            return
+
+        rawVx = (x - self._px) / dt
+        rawVy = (y - self._py) / dt
+        if not self._seeded:
+            #第一个速度直接采纳，不从 0 爬升 —— 那段爬升会被当成一个巨大的假加速度
+            self._vx, self._vy = rawVx, rawVy
+            self._seeded = True
+        else:
+            #低通系数由 dt 推导，不能写死，否则换帧率就变味
+            alpha = 1.0 - math.exp(-dt / self.tau)
+            self._vx += (rawVx - self._vx) * alpha
+            self._vy += (rawVy - self._vy) * alpha
+
+        if self._samples >= 1:
+            #第二个样本起加速度才有意义
+            rawAx = (self._vx - self._prev_vx) / dt
+            rawAy = (self._vy - self._prev_vy) / dt
+            if self.tau_a > 0.0:
+                alphaA = 1.0 - math.exp(-dt / self.tau_a)
+                self._ax += (rawAx - self._ax) * alphaA
+                self._ay += (rawAy - self._ay) * alphaA
+            else:
+                self._ax, self._ay = rawAx, rawAy
+
+        self._prev_vx, self._prev_vy = self._vx, self._vy
+        self._px, self._py = x, y
+        self._samples += 1
 
 
 class PetPhyisc():

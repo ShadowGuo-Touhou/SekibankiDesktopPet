@@ -6,7 +6,7 @@ from PyQt5.QtGui import QPainter
 from PyQt5.QtWidgets import *
 from SettingBox import SettingMenu
 from math import pi, atan,atan2, cos, sin, radians, hypot, ceil
-from PhysicalModule import MousePhysic
+from PhysicalModule import DragSwing
 #Inspired by: https://zhuanlan.zhihu.com/p/521580516
 
 class DesktopPet(QWidget):
@@ -70,6 +70,17 @@ class DesktopPet(QWidget):
         self.MARGIN = 250
         #Scale of the standing gif and of the drag sprite
         self._petImageSize = 0.8
+        #The window is sized once for the worst case - the sprite at any rotation about any
+        #grab point - and the sprite sits dead centre in it. Both are derived in _resize().
+        #Sizing it up front is what lets a drag only ever MOVE the window: a size change is a
+        #separate SetWindowPos from a move and Windows presents the frame in between, which is
+        #the flash you see on every click.
+        self._windowSide = None
+        self._spriteInset = None
+        #Where the grab point sits inside the window, i.e. the rotation pivot. The pivot does
+        #NOT have to be the window centre: keeping it wherever it already is means pressing
+        #down never has to move the window, which is what made the pet appear to jump.
+        self._pivotOffset = None
 
         #-- interaction state -------------------------------------------------------
         #0 is facing right, 1 is facing left. It only carries a value during a drag.
@@ -98,7 +109,7 @@ class DesktopPet(QWidget):
         self._dragRadius = None
         #Top-left corner of the sprite inside the drag window
         self._spriteOrigin = None
-        #Angle the drag sprite is drawn at, i.e. grabAngle + dTheta
+        #Angle the drag sprite is drawn at, i.e. grabAngle + the pendulum's theta
         self._dragAngleDeg = 0.0
         #Scaled drag sprites keyed by (direction, width, height), built once and reused
         self._dragPixmaps = {}
@@ -114,8 +125,9 @@ class DesktopPet(QWidget):
         self._accumulator = 0
         #How many frames has passed since pressed
         self._frame_count = 0
-        # physical module for dragging
-        self._physical_module = None
+        #The damped pendulum that swings the pet while dragging. Built on the first drag,
+        #once the grab point is known, and dropped again on release.
+        self._swing = None
 
         #-- Pressing Config ---------------------------------------------------------
         #This category is used to detect if mouse is continuelly pressing. Somehow PyQT5 doesn't come with a innate event checker, fuck it.
@@ -278,11 +290,19 @@ class DesktopPet(QWidget):
     #Adjust the position when opening the menu
     def _settingMenuMove(self):
         currPos = self.pos()
-        selfSize = self.size()
         menuSize = self._settingMenu.size()
-        #put x to the right of the desktop pet
-        x = currPos.x() + selfSize.width() - self.MARGIN//2 if self.WINDOWWIDTH - currPos.x() - selfSize.width() + self.MARGIN//2> menuSize.width() else currPos.x() - menuSize.width() + self.MARGIN//2
-        y = currPos.y() + selfSize.height()//2 - menuSize.height()//2
+        #Reference the PET, not the window. The window is deliberately oversized so the sprite
+        #can rotate without being clipped, so measuring from it would leave the menu floating
+        #out in the empty border instead of sitting beside her.
+        petLeft = currPos.x() + self._spriteInset
+        petTop = currPos.y() + self._spriteInset
+        petSide = int(self.ORGINALWIDTH*self._petImageSize)
+        #prefer the right of the pet, fall back to the left if the menu would leave the screen
+        if self.WINDOWWIDTH - (petLeft + petSide) >= menuSize.width():
+            x = petLeft + petSide
+        else:
+            x = petLeft - menuSize.width()
+        y = petTop + petSide//2 - menuSize.height()//2
         if y + menuSize.height() > self.WINDOWHEIGHT:
             y = self.WINDOWHEIGHT - menuSize.height()
             return self._settingMenu.move(x,y)
@@ -386,16 +406,20 @@ class DesktopPet(QWidget):
             currentPos = self.mainWindow.pos()
             screenSize = QApplication.primaryScreen().size()
             #random a destine position with random.randint(a,b). a and b equals to either 0 or maxscreen (width/height  - half of the desktop pet size) if out of screen. (that's some long ass code!)
-            xStart = currentPos.x() - self.mr + self.margin if currentPos.x() > self.mr - self.margin else 0 - self.margin
-            xEnd = currentPos.x() - self.margin + self.mr if screenSize.width() > currentPos.x() + self.mr + self.mainWindow.size().width() - self.margin else screenSize.width()-self.mainWindow.size().width() + self.margin
-            xStart = abs(xStart)
-            xEnd = abs(xEnd)
+            #Bound the move by the SPRITE's rect, not the window's. The window is deliberately
+            #oversized so the pet can rotate without being clipped, so bounding the window
+            #would keep her needlessly far from the edges of the screen.
+            inset = self.mainWindow._spriteInset
+            side = int(self.mainWindow.ORGINALWIDTH*self.mainWindow._petImageSize)
+            #The window positions that keep the whole sprite on screen
+            minX, maxX = -inset, screenSize.width() - side - inset
+            minY, maxY = -inset, screenSize.height() - side - inset
+            xStart = min(max(currentPos.x() - self.mr, minX), maxX)
+            xEnd = min(max(currentPos.x() + self.mr, minX), maxX)
             xDestiny = random.randint(min(xStart,xEnd),max(xStart,xEnd))
             
-            yStart= currentPos.y() + self.margin - self.mr if currentPos.y() > self.mr - self.margin else 0 - self.margin
-            yEnd = currentPos.y() + self.mr - self.margin if screenSize.height()> currentPos.y() + self.mr + self.mainWindow.size().height() - self.margin else screenSize.height()-self.mainWindow.size().height() + self.margin
-            yStart = abs(yStart)
-            yEnd = abs(yEnd)
+            yStart = min(max(currentPos.y() - self.mr, minY), maxY)
+            yEnd = min(max(currentPos.y() + self.mr, minY), maxY)
             yDestiny = random.randint(min(yStart,yEnd),max(yStart,yEnd))
             #calculates the difference between current position and destiny. For the sake of memory, I'll reuse variables. This step converts the absolute position on a screen to a relative position to the current position.
             #This is esscentially a substraction of two R2 vectors.
@@ -547,16 +571,23 @@ class DesktopPet(QWidget):
                     if self._stopRequested:
                         return
                     mainPos = self.mainWindow.pos()
-                    mainWidth = self.mainWindow.size().width()
-                    mainHeight = self.mainWindow.size().height()
-                    xPos = mainPos.x() + mainWidth//2 - selfWidth//2
-                    yPos = mainPos.y() - selfHight + self.mainWindow.MARGIN*self.mainWindow._petImageSize//2
+                    #Where the pet actually reaches right now. The window is not always the
+                    #standing one - a press blows it up to 2R and hangs the sprite off the
+                    #centre at an angle BEFORE the click dialog fires - so ask for the real
+                    #outline instead of assuming an upright sprite at a fixed inset.
+                    centreX = mainPos.x() + self.mainWindow.width()//2
+                    centreY = mainPos.y() + self.mainWindow.height()//2
+                    left, top, right, bottom = self.mainWindow._spriteExtents()
+
+                    #Sit the bubble on the top edge of the rotated image, centred on it
+                    xPos = int(centreX + (left+right)/2 - selfWidth//2)
+                    yPos = int(centreY + top - selfHight)
 
                     #prevent the speech bubble from going off screen
                     if xPos < 0: xPos = 0
                     elif xPos+selfWidth>screenWidth: xPos = screenWidth - selfWidth
                     #If the space above desktop isn't enought, move the speech bubble down
-                    if yPos < 0: yPos = mainPos.y() + mainHeight - self.mainWindow.MARGIN*self.mainWindow._petImageSize//2
+                    if yPos < 0: yPos = int(centreY + bottom)
 
                     self.move.emit([int(xPos), int(yPos)])
                     #FPS
@@ -587,14 +618,16 @@ class DesktopPet(QWidget):
             #Grow the window so the sprite can swing about the grab point without ever
             #being clipped, and park the grab point at the window centre so that centre
             #is the rotation pivot.
-            self._dragRadius = self._getWindowSize()
-            self._spriteOrigin = (self._dragRadius - (self._drag_pos.x() - self.MARGIN//2),
-                                  self._dragRadius - (self._drag_pos.y() - self.MARGIN//2))
-            self.resize(2*self._dragRadius, 2*self._dragRadius)
-            cursor = event.globalPos()
-            self.move(cursor.x() - self._dragRadius, cursor.y() - self._dragRadius)
+            #Nothing moves here - not the window, not the sprite. The window only starts
+            #following once the drag really begins, and until then the pet stays exactly
+            #where it was, so a click cannot make it jump.
+            self._dragRadius = self._windowSide//2
+            self._spriteOrigin = (self._spriteInset, self._spriteInset)
+            #The grab point in window coordinates IS the pivot, and _drag_pos already holds it
+            self._pivotOffset = self._drag_pos
             #paintEvent draws the rotating sprite, so the gif label steps aside
             self.petLabel.hide()
+            self.repaint()
             #Re-assert the mouse grab. Resizing and moving the window can drop the implicit
             #grab Qt takes on press, and once that happens the release event never arrives,
             #leaving the pet glued to the cursor. An explicit grab is rebindable, so doing
@@ -649,14 +682,30 @@ class DesktopPet(QWidget):
             #Shrinking the window moves the sprite: during a drag it sits at _spriteOrigin,
             #but the standing layout puts it at (MARGIN//2, MARGIN//2). Re-place the window
             #so the sprite stays put on screen instead of jumping by that difference.
-            keep_x = self.pos().x() + self._spriteOrigin[0] - self.MARGIN//2
-            keep_y = self.pos().y() + self._spriteOrigin[1] - self.MARGIN//2
+            keep_x = self.pos().x() + self._spriteOrigin[0] - self._spriteInset
+            keep_y = self.pos().y() + self._spriteOrigin[1] - self._spriteInset
+            #The sprite is upright again, so it occupies the plain _spriteInset rect.
+            #The swing may have left a corner or two off the display; slide the window back
+            #by the shortest distance that brings the whole image inside.
+            W = int(self.ORGINALWIDTH*self._petImageSize)
+            H = int(self.ORGINALHEIGHT*self._petImageSize)
+            sprite_x = keep_x + self._spriteInset
+            sprite_y = keep_y + self._spriteInset
+            if sprite_x < 0: keep_x -= sprite_x
+            elif sprite_x + W > self.WINDOWWIDTH: keep_x -= (sprite_x + W) - self.WINDOWWIDTH
+            if sprite_y < 0: keep_y -= sprite_y
+            elif sprite_y + H > self.WINDOWHEIGHT: keep_y -= (sprite_y + H) - self.WINDOWHEIGHT
+            #Back to the standing window in ONE geometry call: shrink and move together, so
+            #Windows has no gap to present a half-restored frame in. Updates stay off until
+            #the window is already in its final place.
+            #Back to the standing look. There is NO resize here: the window was already the
+            #standing size all along, so releasing only has to put it back where it belongs.
             self.petLabel.show()
             self._dragRadius = None
             self._spriteOrigin = None
             self._dragAngleDeg = 0.0
             self._dragPixmaps.clear()
-            self._resize()
+            self._swing = None
             self.move(keep_x, keep_y)
         #resume standby phase
         self._beginStandbyPhase()
@@ -747,10 +796,9 @@ class DesktopPet(QWidget):
             # Return true if a frame has indeed changed
             self._accumulator -= self._frame_rate
             self._frame_count += 1
-            if self._frame_count == 5:
+            if self._frame_count == 10:
                 self._draging = True
                 self._dragged = True
-                self._physical_module = MousePhysic(QCursor.pos())
             #Safety net. If the platform drops the mouse grab, the release event never
             #arrives and the pet would stay glued to the cursor forever. Poll the actual
             #button state instead of trusting the event. The explicit grab above is the
@@ -763,6 +811,34 @@ class DesktopPet(QWidget):
 
         return True
 
+    def _spriteExtents(self):
+        '''How far the pet reaches from the centre of its window: (left, top, right, bottom).
+
+        Standing, that is just half the sprite. While dragging the window centre IS the
+        pivot and the pet hangs off it at an angle, so the four corners are rotated by the
+        draw angle and the answer is their bounding box. Callers that need the pet's real
+        outline - the edge clamp and the speech bubble - both use this, so neither has to
+        assume the sprite is upright.
+        '''
+        W = int(self.ORGINALWIDTH*self._petImageSize)
+        H = int(self.ORGINALHEIGHT*self._petImageSize)
+        if self._dragRadius is None:
+            return -W/2, -H/2, W/2, H/2
+        #Grab point in sprite-local coordinates
+        gx = self._drag_pos.x() - self._spriteInset
+        gy = self._drag_pos.y() - self._spriteInset
+        angle = radians(self._dragAngleDeg)
+        cosA, sinA = cos(angle), sin(angle)
+        left = right = top = bottom = 0.0
+        for cornerX, cornerY in ((0,0), (W,0), (0,H), (W,H)):
+            offsetX = cornerX - gx
+            offsetY = cornerY - gy
+            rotX = offsetX*cosA - offsetY*sinA
+            rotY = offsetX*sinA + offsetY*cosA
+            left, right = min(left, rotX), max(right, rotX)
+            top, bottom = min(top, rotY), max(bottom, rotY)
+        return left, top, right, bottom
+
     def _petDraggedMove(self) -> None:
         '''Moving Pet alone with the cursor'''
         #A live drag radius is what makes the pet follow: without it there is no pivot to
@@ -771,7 +847,6 @@ class DesktopPet(QWidget):
             return
         eventPos = QCursor.pos()
         dx = abs(self._FacingDirectionUpdate(eventPos))
-        self._physical_module._update(eventPos)
 
         #update previous drag pos
         self._previous_drag_pos = eventPos
@@ -782,16 +857,21 @@ class DesktopPet(QWidget):
         #cursor keeps the grabbed spot under the mouse at every rotation angle.
         #This is what replaced the old _drag_pos + "+15" anchor correction.
         R = self._dragRadius
-        xPos = eventPos.x() - R
-        yPos = eventPos.y() - R
-        #Keep the pivot itself on screen; the window may hang off the edge, the pet
-        #then simply gets cut by the screen border.
-        if xPos < -R: xPos = -R
-        elif xPos > self.WINDOWWIDTH - R: xPos = self.WINDOWWIDTH - R
-        if yPos < -R: yPos = -R
-        elif yPos > self.WINDOWHEIGHT - R: yPos = self.WINDOWHEIGHT - R
 
-        self.move(int(xPos), int(yPos))
+        #Keep the sprite on screen. The window centre is the pivot, so _spriteExtents hands
+        #back the bounding box of the rotated sprite around it; clamping the pivot by those
+        #four reach values keeps the whole pet inside whatever angle it is hanging at.
+        left, top, right, bottom = self._spriteExtents()
+        pivot_x = eventPos.x()
+        pivot_y = eventPos.y()
+        if pivot_x < -left: pivot_x = -left
+        elif pivot_x > self.WINDOWWIDTH - right: pivot_x = self.WINDOWWIDTH - right
+        if pivot_y < -top: pivot_y = -top
+        elif pivot_y > self.WINDOWHEIGHT - bottom: pivot_y = self.WINDOWHEIGHT - bottom
+
+        #Park the pivot on the cursor. On the first tick after a press this is a no-op, because
+        #the cursor has not moved and the pivot is still exactly where it was grabbed.
+        self.move(int(pivot_x - self._pivotOffset.x()), int(pivot_y - self._pivotOffset.y()))
 
 
     #This function decides the type of movement desktoppet is experiencing.
@@ -836,17 +916,11 @@ class DesktopPet(QWidget):
             self.petImage.start()
 
     def _changeDragAngle(self, dx, eventPos):
-        #if the greatest dx can be is 50
-        
-        #dx is the change in position, i.e.velocity of the cursor
-        #Use equation Δθ = (wi)t + (1/2)(a)(t**2) to derive the angle change
-        t = 1
-        a = -0.5
-        dTheta = dx*t*self._amplifier + 0.5*a*(t)**2
-
-        #Change rotation direction based of facingDirection
-        dTheta = -dTheta if self._facingDirection == 0 else dTheta
-        
+        #The swing is a damped pendulum hung from the grab point and advanced by a fixed
+        #timestep. It replaces the old "dTheta = dx*amplifier" formula, which derived the
+        #angle from how far the cursor had moved since the previous mouse event: that made
+        #the pet swing wildly on a high-polling mouse and barely at all on a 125Hz one.
+        #dx stays in the signature for compatibility but the physics no longer reads it.
     #simulate the physic effect of pet rotated due to gravity, it is aorund the piovt (where user clicks)
     #Since the grab position doesn't change during the drag, we only need it to run once
         if self._rotationMatrixTranslate:
@@ -856,8 +930,8 @@ class DesktopPet(QWidget):
             W = int(self.ORGINALWIDTH*self._petImageSize)
             H = int(self.ORGINALHEIGHT*self._petImageSize)
             #Grab point in sprite-local coordinates
-            gx = self._drag_pos.x() - self.MARGIN//2
-            gy = self._drag_pos.y() - self.MARGIN//2
+            gx = self._drag_pos.x() - self._spriteInset
+            gy = self._drag_pos.y() - self._spriteInset
             #Find the difference in Y from the centre of the sprite
             ydiff = H//2 - gy
             #Find the difference in X from the centre of the sprite
@@ -940,41 +1014,42 @@ class DesktopPet(QWidget):
             # print(self.grabAngle)
             # self.move(self.pos()+moveDistance)
 
+            #The pendulum's arm and its starting angle both come from where the pet was
+            #grabbed, so it is built here - the one moment the grab is known.
+            self._swing = DragSwing((gx, gy), (W, H), self.grabAngle)
             self._rotationMatrixTranslate = False
 
-        #paintEvent draws the sprite rotated about the window centre, so the only thing
-        #this method has to publish is the total angle to draw at. No pixmap is built
-        #here and no anchor correction is needed any more.
-        self._dragAngleDeg = self.grabAngle + dTheta
+        #paintEvent draws the sprite rotated about the window centre, so the only thing this
+        #method has to publish is the total draw angle. theta starts at -grabAngle, so the
+        #render angle is 0 on the first frame: the pet keeps the pose you grabbed it in and
+        #gravity then swings it down.
+        self._dragAngleDeg = self.grabAngle + self._swing.step(eventPos, self._frame_rate)
         self.update()
 
 
-    def _resize(self):
+    def _resize(self, at=None):
         #get the width&height after resize
         newWidth = int(self.ORGINALWIDTH*self._petImageSize)
         newHeight = int(self.ORGINALHEIGHT*self._petImageSize)
         #rescale petImage with it.
         self.petImage.setScaledSize(QSize(newWidth, newHeight))
-        #Resize the window and the label holding gif        
-        self.resize(newWidth+self.MARGIN, newHeight+self.MARGIN)
-        self.petLabel.resize(newWidth+self.MARGIN, newHeight+self.MARGIN)
-        self.petLabel.move(self.MARGIN//2, 0)
-
-    def _getWindowSize(self) -> int:
-        '''Half the side of the drag window.
-
-        The sprite can swing to any angle about the grabbed point, so the window has to
-        reach the farthest sprite corner from that point, and R is exactly that distance.
-        A window of side 2R with the grab at its centre therefore holds the sprite at any
-        rotation angle without clipping it.
-        '''
-        W = int(self.ORGINALWIDTH * self._petImageSize)
-        H = int(self.ORGINALHEIGHT * self._petImageSize)
-        #Grab point in sprite-local coordinates
-        gx = self._drag_pos.x() - self.MARGIN//2
-        gy = self._drag_pos.y() - self.MARGIN//2
-        return int(ceil(max(hypot(gx, gy), hypot(W-gx, gy),
-                            hypot(gx, H-gy), hypot(W-gx, H-gy))))
+        #Big enough for the sprite at ANY rotation about ANY grab point: the window centre is
+        #the rotation pivot, so the window only has to reach the farthest corner, which is the
+        #diagonal. Sizing for that from the start means a drag never resizes the window.
+        side = 2*int(ceil(hypot(newWidth, newHeight)))
+        self._windowSide = side
+        self._spriteInset = (side - newWidth)//2
+        if at is None:
+            self.resize(side, side)
+        else:
+            #Position and size in one call, for the rare resize that still happens (startup
+            #and a tray scale change)
+            self.setGeometry(at[0], at[1], side, side)
+        #The label covers the whole window and centres the movie, matching what paintEvent
+        #does with the drag sprite
+        self.petLabel.setAlignment(Qt.AlignCenter)
+        self.petLabel.resize(side, side)
+        self.petLabel.move(0, 0)
 
     def _dragSprite(self, direction):
         '''Scaled drag sprite for a facing direction, built once and reused.'''
@@ -991,12 +1066,12 @@ class DesktopPet(QWidget):
         #painter is what lets the sprite take any angle without ever being clipped.
         if self._dragRadius is None:
             return
-        c = self._dragRadius
+        pivotX, pivotY = self._pivotOffset.x(), self._pivotOffset.y()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        painter.translate(c, c)
+        painter.translate(pivotX, pivotY)
         painter.rotate(self._dragAngleDeg)
-        painter.translate(-c, -c)
+        painter.translate(-pivotX, -pivotY)
         painter.drawPixmap(self._spriteOrigin[0], self._spriteOrigin[1],
                            self._dragSprite(self._facingDirection))
         
