@@ -89,6 +89,25 @@ class DesktopPet(QWidget):
         #Closed while the setting menu is open, so dragging cannot fight the menu
         self._draggable = True
 
+        #-- Animation config --------------------------------------------------------
+        #This is the frame rate of dragging animation update
+        self._frame_rate = 1/60
+        #This is the time of last frame detection, used to detect time lapse 
+        self._last_tick = None
+        #Accumulated time lapse, used for detect if a frame should be updated
+        self._accumulator = 0
+        #How many frames has passed since pressed
+        self._frame_count = 0
+
+        #-- Pressing Config ---------------------------------------------------------
+        #This category is used to detect if mouse is continuelly pressing. Somehow PyQT5 doesn't come with a innate event checker, fuck it.
+        self._pressTimer = QTimer(self)
+        self._pressTimer.setTimerType(Qt.PreciseTimer)
+        # QTimer works in miliseconds
+        self._pressTimer.setInterval(1000 // 60) 
+        # Time out event triggers tick detection
+        self._pressTimer.timeout.connect(self._frame_has_passed)
+
         #-- configuration -----------------------------------------------------------
         #Copied out of config.json by SettingMenu.getConfig()
         self.SETTING = None
@@ -539,6 +558,7 @@ class DesktopPet(QWidget):
         self._quitStandbyPhase()
         #Flag for pet transformation
         self._rotationMatrixTranslate = True
+        self._frame_counter_start()
 
         #Enter drag event if mouse pressed is left button
         if event.button() == Qt.LeftButton and self._draggable:
@@ -546,6 +566,8 @@ class DesktopPet(QWidget):
             #adjust anchor of movement position
             self._drag_pos = event.globalPos() - self.pos()
             self._previous_drag_pos = event.globalPos()
+            #Initiate frame rate calculation
+            
         else:
             self._draging = False
             self._SettingMenuOpen()
@@ -566,6 +588,8 @@ class DesktopPet(QWidget):
         event.accept()
 
     def mouseReleaseEvent(self, event):
+        #Stop mouse press timer couting
+        self._pressTimer.stop()
         #only restore the standing gif when the pet was actually dragged, otherwise a plain click
         #would interrupt the animation that is already playing
         if self._draging and self._dragged:
@@ -631,17 +655,46 @@ class DesktopPet(QWidget):
     def _randomPos(self) -> int:
         petSize = self.size()
         return random.randint(0, self.WINDOWWIDTH-petSize.width()), random.randint(0, self.WINDOWHEIGHT-petSize.height())
+
+# -- Dragging functions --------------------------------------------------------------------------
     
+    def _frame_counter_start(self):
+        '''Initiate the timer for dragging'''
+        #initial time for pet being clicked
+        self._last_tick = time.perf_counter()
+        #begin counting time lapses
+        self._accumulator = 0
+        # Start press detector
+        self._pressTimer.start()
+        self._frame_count = 0
+
+    def _frame_has_passed(self) -> bool:
+        '''Calculate if a frame has passed'''
+        # Get current time
+        now = time.perf_counter()
+        # Get time elapse between two call
+        elapse = now - self._last_tick
+        self._last_tick = now
+        # Add time lapse, set a maximum of 0.25 second incase of program lag or none response
+        self._accumulator += min(elapse, 0.25)
+
+        # Detect if a frame has changed
+        if self._accumulator >= self._frame_rate:
+            # Return true if a frame has indeed changed
+            self._accumulator -= self._frame_rate
+            self._frame_count += 1
+
+            return True
+        
+
     #This function decides the type of movement desktoppet is experiencing.
-    def _petDragMovement(self, eventPos:int, ) -> None:
+    def _petDragMovement(self, eventPos:int) -> None:
         #a real drag happened, so the release handler has to restore the normal gif
         self._dragged = True
-        #decide the current facing direction by mius
-        facingDirection = self._previous_drag_pos.x() - eventPos.x()
+
         #Grab the change in position
-        dx = abs(facingDirection)
-        #adjust the facingDirection based on the sign of difference
-        self._facingDirection = 1 if facingDirection < 0 else 0
+        dx = abs(self._FacingDirectionUpdate(eventPos))
+
 
 
 
@@ -673,6 +726,15 @@ class DesktopPet(QWidget):
     def _beginStandbyPhase(self):
         for Timer in self._standByTimers.values():
             Timer.start()
+
+    def _FacingDirectionUpdate(self, eventPos) -> int:
+        '''Detect change is facing direction. If X is positive, moving right; negative, moving left'''
+        #decide the current facing direction by comparing two coordinates
+        facingDirection = self._previous_drag_pos.x() - eventPos.x()
+        #adjust the facingDirection based on the sign of difference
+        self._facingDirection = 1 if facingDirection < 0 else 0
+        # Return the magnitude of change
+        return facingDirection
 
     #change facing direction
     def _changeFacingDirection(self, facingDirection):
