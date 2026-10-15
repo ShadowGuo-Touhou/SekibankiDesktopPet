@@ -53,12 +53,12 @@ class SettingMenu(QWidget):
         except Exception as e:
             print(e)
             self.warning.emit(str(e))
-            self.SETTING = {'start':20, 'end':300, 'language': 0, "clickDialogFrequency": 50, "speechBubbleOpacity": 0.5, "amplifier": 1}
+            self.SETTING = {'start':20, 'end':300, 'language': 0, "clickDialogFrequency": 50, "speechBubbleOpacity": 0.5, "amplifier": 1, "showInTaskbar": False}
         #load language, since there ain't really much text, I'll just embed language file in the code.
         if self.SETTING['language'] == 0:
-            self.LANGUAGE = {"moveInterval": "Movement Interval:", "to": "to", "seconds": "seconds.", "language": "language",'dialogInterval': 'Dialog Interval:', "illegalInputWarning": "Not gonna work, check your inputs, dummy.", "successfulSave": "Got it. I'll make the change after restart.", "newBubble":"Enter the name for new dialog group:", 'newBubble2': "Enter the content of dialog:", 'deleteBubble': "Confirm deleting", "error": "Error encountered:", "time": "Duration:", "color":"Speechbubble color:", "colorText":"Text Color:",'tooManyClickWarning': "Hey! don't click so many times!\nMy creator didn't handle exceptions properly...", "clickDialogFrequency":"Click dialog display chance:", "speechBubbleOpacity":"Speechbubble opacity: ", "amplifier":"Swing intensity: "}
+            self.LANGUAGE = {"moveInterval": "Movement Interval:", "to": "to", "seconds": "seconds.", "language": "language",'dialogInterval': 'Dialog Interval:', "illegalInputWarning": "Not gonna work, check your inputs, dummy.", "successfulSave": "Got it. I'll make the change after restart.", "newBubble":"Enter the name for new dialog group:", 'newBubble2': "Enter the content of dialog:", 'deleteBubble': "Confirm deleting", "error": "Error encountered:", "time": "Duration:", "color":"Speechbubble color:", "colorText":"Text Color:",'tooManyClickWarning': "Hey! don't click so many times!\nMy creator didn't handle exceptions properly...", "clickDialogFrequency":"Click dialog display chance:", "speechBubbleOpacity":"Speechbubble opacity: ", "amplifier":"Swing intensity: ", "showInTaskbar":"Show in taskbar:", "on": "On", "off": "Off"}
         else:
-            self.LANGUAGE = {'moveInterval': "移动时间间隔:", 'to': '到', 'seconds': '秒。', 'language': '语言', 'dialogInterval': '对话出现间隔：','illegalInputWarning': '参数错误，检查一下啦，笨蛋。', 'successfulSave': '知道啦，重启时改正~', 'newBubble': '请输入新对话列表的名称：', 'newBubble2': "请输入对话内容：",'deleteBubble': '确认删除', "error":"遭遇错误：", 'time': "持续时间：", "color":"对话泡颜色：", "colorText":"文本颜色：","tooManyClickWarning": "喂！少点几下哦！\n作者没做Exception Handling啦...", "clickDialogFrequency":"点击对话出现概率: ", "speechBubbleOpacity":"对话泡透明度：", "amplifier":"移动摇晃强度："}
+            self.LANGUAGE = {'moveInterval': "移动时间间隔:", 'to': '到', 'seconds': '秒。', 'language': '语言', 'dialogInterval': '对话出现间隔：','illegalInputWarning': '参数错误，检查一下啦，笨蛋。', 'successfulSave': '知道啦，重启时改正~', 'newBubble': '请输入新对话列表的名称：', 'newBubble2': "请输入对话内容：",'deleteBubble': '确认删除', "error":"遭遇错误：", 'time': "持续时间：", "color":"对话泡颜色：", "colorText":"文本颜色：","tooManyClickWarning": "喂！少点几下哦！\n作者没做Exception Handling啦...", "clickDialogFrequency":"点击对话出现概率: ", "speechBubbleOpacity":"对话泡透明度：", "amplifier":"移动摇晃强度：", "showInTaskbar":"在工具栏显示：", "on": "开", "off": "关"}
 
             
     def loadDialog(self):
@@ -286,6 +286,21 @@ class SettingMenu(QWidget):
         languageLayout.addWidget(self.languageChoice)
         settingPageLayout.addLayout(languageLayout)
 
+        #Add "show in taskbar": makes the pet a normal top-level window so screen
+        #recorders (OBS etc.) can pick it up as a window capture source.
+        #Read with .get so an older config.json without the key still opens.
+        showInTaskbarLayout = QHBoxLayout()
+        showInTaskbarLayout.addWidget(QLabel(self.LANGUAGE['showInTaskbar']))
+        showInTaskbarLayout.addStretch(0)
+        self.showInTaskbarChoice = QComboBox()
+        self.showInTaskbarChoice.addItem(self.LANGUAGE['off'])
+        self.showInTaskbarChoice.addItem(self.LANGUAGE['on'])
+        self.showInTaskbarChoice.setFixedWidth(100)
+        self.showInTaskbarChoice.setCurrentIndex(
+            1 if self.SETTING.get('showInTaskbar', False) else 0)
+        showInTaskbarLayout.addWidget(self.showInTaskbarChoice)
+        settingPageLayout.addLayout(showInTaskbarLayout)
+
         #Add a stretch to the layout for spacing
         settingPageLayout.addStretch(1)
         #add save setting button
@@ -318,8 +333,9 @@ class SettingMenu(QWidget):
         swingIntensity = int(self.swingIntensity.text())
 
         language = self.languageChoice.currentIndex()
+        showInTaskbar = self.showInTaskbarChoice.currentIndex() == 1
         with open('assets/Settings/config.json', 'w+') as s:
-            json.dump({'start': start, 'end': end, 'language': language, 'clickDialogFrequency':clickDialogFrequency, 'speechBubbleOpacity':speechBubbleOpacity/100, "amplifier":swingIntensity}, s)
+            json.dump({'start': start, 'end': end, 'language': language, 'clickDialogFrequency':clickDialogFrequency, 'speechBubbleOpacity':speechBubbleOpacity/100, "amplifier":swingIntensity, "showInTaskbar":showInTaskbar}, s)
         #emit signal
         self.warning.emit(self.LANGUAGE['successfulSave'])
         self.quit()

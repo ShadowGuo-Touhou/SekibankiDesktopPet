@@ -7,7 +7,57 @@ from PyQt5.QtWidgets import *
 from SettingBox import SettingMenu
 from math import pi, atan,atan2, cos, sin, radians, hypot, ceil
 from PhysicalModule import DragSwing
+try:
+    #Playback backend. See _playSound for why QSoundEffect was dropped.
+    #The pet is Windows-only, but keep the import soft so a stray non-Windows run survives.
+    import winsound
+except ImportError:
+    winsound = None
 #Inspired by: https://zhuanlan.zhihu.com/p/521580516
+
+#Where the sound effects live. Derived from this file's own location rather than from the
+#working directory: the pet also ships as an .exe and can be launched from anywhere.
+def _assetRoot():
+    '''Folder that holds assets/.
+
+    Three cases, in order: running from source (the folder this file lives in); a frozen
+    build that bundled the assets (PyInstaller's temp extraction dir); a frozen build
+    shipped next to an assets/ folder (the folder holding the .exe). The pet's other asset
+    paths are still relative to the working directory, so a frozen build has to be started
+    from the project folder either way - but the sounds must not silently go missing just
+    because __file__ points into PyInstaller's temp dir.
+    '''
+    candidates = []
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        candidates.append(bundle)
+        candidates.append(os.path.dirname(os.path.abspath(sys.executable)))
+    else:
+        candidates.append(os.path.dirname(os.path.abspath(__file__)))
+    candidates.append(os.getcwd())
+    for root in candidates:
+        if os.path.isdir(os.path.join(root, "assets")):
+            return root
+    return candidates[0]
+
+
+SOUND_DIR = os.path.join(_assetRoot(), 'assets', 'Sound')
+#Click feedback timing: how long the squash lasts, how far the pet squashes at its lowest
+#point, and the animation frame interval. Deliberately independent of _frame_rate, which
+#belongs to the drag.
+#The squash is drawn in a fixed number of steps. Driving it by frame index rather than by
+#the clock is deliberate: a clock-driven animation on a loaded event loop simply drops most
+#of its frames - the pet snaps from nearly upright to squashed and back in two or three
+#visible steps, which is exactly what happened when only 2-4 ticks fitted into 250 ms.
+#Frame-driven, a busy loop makes the animation take a little longer instead of destroying it.
+SQUASH_FRAMES = 16
+#Nominal length of the animation, and the hard cap. The cap matters because a starved event
+#loop must not be able to leave the pet stuck mid-animation: past it the animation is cut
+#short and control goes back to standby.
+SQUASH_DURATION = 0.25
+SQUASH_MAX_DURATION = 1.0
+SQUASH_DEPTH = 0.2
+SQUASH_INTERVAL_MS = 16
 
 class DesktopPet(QWidget):
     #initialization process
@@ -17,6 +67,8 @@ class DesktopPet(QWidget):
         self._initSettingMenu()
         #initialize the window
         self._init()
+        #build and warm up the sound effects, now that SETTING is loaded
+        self._initSound()
         #initialize and show pet image
         self._initPetImage()
         #initialize the tray icon for pet
@@ -34,7 +86,15 @@ class DesktopPet(QWidget):
         #FramelessWindowHint: create a frameless window
         #WindowStaysOnTopHint: keep window on top
         #SubWIndow: keep the window a subwindow regardless of the existance of parent window
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
+        #config.json 的 showInTaskbar 打开时改用 Qt.Window（正常顶层窗口）：任务栏会长出
+        #条目，录屏软件（OBS 等）也才能把它列成窗口捕获源。SubWindow/Tool 这类窗口在
+        #Windows 上带着 WS_EX_TOOLWINDOW，任务栏和捕获列表里都不会出现。
+        #无边框、透明、置顶三件事不受影响。
+        #用 .get 读，老 config.json 没有这个键时按「关」处理。
+        if self._settingMenu.getConfig().get('showInTaskbar', False):
+            self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Window)
+        else:
+            self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
         # self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
 
         #Don't fill window with background color
@@ -64,8 +124,11 @@ class DesktopPet(QWidget):
         #-- geometry constants ------------------------------------------------------
         self.WINDOWWIDTH = QApplication.primaryScreen().size().width()
         self.WINDOWHEIGHT = QApplication.primaryScreen().size().height()
-        self.ORGINALWIDTH = 549
-        self.ORGINALHEIGHT = 549
+        #Sprite canvas size, read from the artwork itself rather than hardcoded. Every layout
+        #constant in this file is derived from these two numbers, so swapping in a
+        #differently sized set of drawings no longer means hunting for a magic 549 that
+        #nothing warns you has gone stale.
+        self.ORGINALWIDTH, self.ORGINALHEIGHT = self._readSpriteSize()
         #Blank border kept around the pet so a rotated or enlarged sprite is not clipped
         self.MARGIN = 250
         #Scale of the standing gif and of the drag sprite
@@ -81,6 +144,23 @@ class DesktopPet(QWidget):
         #NOT have to be the window centre: keeping it wherever it already is means pressing
         #down never has to move the window, which is what made the pet appear to jump.
         self._pivotOffset = None
+
+        #-- click feedback ----------------------------------------------------------
+        #Sound effects, filled in by _initSound
+        self._sfx = {}
+        #True while the click squash owns the pet; every mouse event is swallowed until then
+        self._busy = False
+        #Drives the squash animation. It cannot reuse the drag frame counter: that one runs
+        #off _pressTimer, which _endDrag has already stopped by the time a squash starts,
+        #and it would also need mouse events, of which there are none while squashing.
+        self._squashTimer = QTimer(self)
+        self._squashTimer.setInterval(SQUASH_INTERVAL_MS)
+        self._squashTimer.timeout.connect(self._squashTick)
+        self._squashStart = 0.0
+        #Which step of the squash is being drawn. Frame-driven, see _squashTick.
+        self._squashFrame = 0
+        #The static drag sprite the squash is drawn from, or None when no squash is running
+        self._squashPixmap = None
 
         #-- interaction state -------------------------------------------------------
         #0 is facing right, 1 is facing left. It only carries a value during a drag.
@@ -185,6 +265,21 @@ class DesktopPet(QWidget):
         #the configuration
         self.SETTING = self._settingMenu.getConfig()
         self._amplifier = self.SETTING['amplifier']
+
+    def _readSpriteSize(self):
+        '''Pixel size of the pet's artwork, read from the image files themselves.
+
+        QImageReader takes the dimensions out of the file header without decoding a frame,
+        which matters here: the standing gifs are ~2 MB and 90 frames long, and this runs
+        before anything is on screen.
+        '''
+        for path in self.normalStates + self.dragState:
+            size = QImageReader(path).size()
+            if size.isValid() and not size.isEmpty():
+                return size.width(), size.height()
+        #Nothing readable. Keep the pet startable, on the size the shipped artwork used to be.
+        print("[sprite] no readable sprite size, falling back to 549x549")
+        return 549, 549
 
     def _initTrayIcon(self):
         #import prepared trayicon image
@@ -472,6 +567,12 @@ class DesktopPet(QWidget):
         if self._speechBubbleCondition == True:
             return
 
+        #A scheduled dialog is the pet talking to you, so it gets a voice. The click dialog
+        #already answers with click.wav, and system text is not the pet speaking, so neither
+        #of those gets talk.wav.
+        if text is None and id is not None and id != 'clickDialog':
+            self._playSound('talk')
+
         #Determine what type of speech bubble to display
         #If entered text, its a system text, default some attribute
         if text:
@@ -496,7 +597,33 @@ class DesktopPet(QWidget):
         self._speechBubbleWork.finished.connect(self._speechBubbleWork.deleteLater)
         self._speechBubbleWork.finished.connect(self._speechBubble.deleteLater)
         self._speechBubbleWork.finished.connect(self._speechBubbleConditionChange)
-        self._speechBubbleWork.move.connect(lambda coor: self._speechBubble.move(coor[0], coor[1]))
+        #Show the bubble straight away but fully transparent, and reveal it on the first
+        #move the worker produces.
+        #
+        #Showing first is deliberate, and it is why this uses opacity rather than leaving the
+        #window hidden: move() on a top-level window that has never been shown does NOT
+        #reliably stick on Windows - the window manager overrides the position when the
+        #window finally appears, which lands the bubble back at the default spot. At
+        #windowOpacity 0 it is composited but invisible, so nothing is ever seen at that
+        #default spot, and by the time it becomes visible the correct move has been applied.
+        #The worker emits its first move on the very first loop iteration.
+        self._speechBubble.setWindowOpacity(0.0)
+
+        def placeBubble(coor, bubble=self._speechBubble):
+            bubble.move(coor[0], coor[1])
+            #Reveal only once the pet is back in its standing layout.
+            #
+            #A click dialog is created while the button is still down, and in that state
+            #_spriteExtents() measures the pet from the GRAB POINT rather than from the
+            #sprite's own centre - so unless the click landed dead centre, the first few
+            #positions the worker sends are wrong, and the bubble would be seen sitting over
+            #the pet's face before jumping up to its head. Waiting for the release means the
+            #first place it is ever seen is the place it belongs. Scheduled dialogs fire
+            #with the pet already standing, so they are unaffected.
+            if bubble.windowOpacity() == 0.0 and self._dragRadius is None:
+                bubble.setWindowOpacity(1.0)
+
+        self._speechBubbleWork.move.connect(placeBubble)
 
         self._speechBubbleThread.start()
         self._speechBubble.show()
@@ -598,10 +725,124 @@ class DesktopPet(QWidget):
     
     def _speechBubbleConditionChange(self):
         self._speechBubbleCondition = not self._speechBubbleCondition 
-    
+
+#-Sound-------------------------------------------------------------------------------------------------
+
+    def _initSound(self):
+        '''Collect the sound files that actually exist, keeping only their absolute paths.
+
+        Building QSoundEffect players here was the first attempt and it was wrong: play()
+        blocks the calling thread for 240-680 ms every so often. See _playSound.
+        '''
+        #Rebuild from scratch so calling this twice cannot leave a stale entry behind
+        self._sfx = {}
+        for name in ('click', 'talk'):
+            path = os.path.join(SOUND_DIR, name + '.wav')
+            if not os.path.isfile(path):
+                #A missing effect must never stop the pet from starting
+                # print("[sound] missing %s, that effect stays silent" % path)
+                continue
+            self._sfx[name] = os.path.abspath(path)
+
+    def _playSound(self, name):
+        '''Play one effect. Calling it again mid-playback restarts it, which is what a
+        repeated click should sound like.
+
+        QSoundEffect was the obvious choice and it does not work here. play() blocks the
+        calling thread intermittently - measured at up to 680 ms, and still 243 ms on a
+        repeat call. Called from a mouse handler that freezes the event loop, so the squash
+        timer delivered no frame at all and its first tick saw an elapsed time already past
+        the end of the animation: the pet made the noise and never moved.
+        winsound's async playback returns in microseconds (measured worst case 1.9 ms).
+        '''
+        if winsound is None:
+            return
+        path = self._sfx.get(name)
+        if path is None:
+            return
+        #SND_ASYNC returns immediately; SND_NODEFAULT keeps Windows from falling back to its
+        #own beep if the file cannot be opened after all.
+        winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC
+                                 | winsound.SND_NODEFAULT)
+
+#-Click squash------------------------------------------------------------------------------------------
+
+    def _startSquash(self):
+        '''Squash the pet once and hand control back to standby when the animation ends.'''
+        #Play the sound BEFORE the clock starts. Anything that blocks inside _playSound
+        #would otherwise eat the whole animation: the event loop stays frozen for longer
+        #than the animation lasts, and the first tick then closes it on the spot.
+        self._playSound('click')
+        self._busy = True
+        self._squashFrame = 0
+        #Squash the STATIC drag sprite rather than the standing gif. Pressing the pet already
+        #switched it to that sprite, so squashing the gif would swap the picture back to the
+        #animation for the length of the squash and then swap it again on the way out, which
+        #reads as the sprite glitching rather than as the pet being squashed.
+        self._squashPixmap = self._dragSprite(self._facingDirection)
+        self.petLabel.setPixmap(self._squashPixmap)
+        self._squashStart = time.perf_counter()
+        self._squashTimer.start()
+        # print("Start")
+
+    def _squashTick(self):
+        '''Advance the squash by exactly one step.'''
+        self._squashFrame += 1
+        elapsed = time.perf_counter() - self._squashStart
+        #The step count ends the animation, not the clock. The clock is only a safety cap so
+        #a starved event loop cannot leave the pet squashed and unresponsive.
+        if self._squashFrame >= SQUASH_FRAMES or elapsed >= SQUASH_MAX_DURATION:
+            self._endSquash()
+            return
+        #One smooth push down and back up: 1.0 -> 0.8 -> 1.0, with no jump at either end
+        scale = 1.0 - SQUASH_DEPTH * sin(pi * self._squashFrame / SQUASH_FRAMES)
+        self._applySquash(scale)
+        # print("squashing")
+
+    def _endSquash(self):
+        '''Stop the animation, hand the label back to the standing gif, resume standby.'''
+        self._squashTimer.stop()
+        self._applySquash(1.0)
+        #Hand the label back to the standing animation. setMovie does not restart a running
+        #QMovie, and the movies are cached, so the gif resumes on the frame it was left at.
+        self._squashPixmap = None
+        if self.petImage is not None:
+            self.petLabel.setMovie(self.petImage)
+            if self.petImage.state() != QMovie.Running:
+                self.petImage.start()
+        self._busy = False
+        self._beginStandbyPhase()
+        # print("end")
+
+    def _applySquash(self, scale):
+        '''Scale the pet vertically about its BOTTOM edge.
+
+        petLabel centres its content, so shrinking it alone would lift the feet off the
+        ground and squash the pet towards its middle. Moving the label down by half of the
+        height that was lost pins the bottom edge in place, so the pet squashes downwards.
+
+        During a click the content is the static drag sprite; the standing gif is only used
+        if a squash somehow starts without one.
+        '''
+        W = int(self.ORGINALWIDTH*self._petImageSize)
+        H = int(self.ORGINALHEIGHT*self._petImageSize)
+        height = max(1, int(round(H*scale)))
+        if self._squashPixmap is not None:
+            self.petLabel.setPixmap(self._squashPixmap.scaled(
+                W, height, Qt.IgnoreAspectRatio, Qt.SmoothTransformation))
+        elif self.petImage is not None:
+            self.petImage.setScaledSize(QSize(W, height))
+        self.petLabel.move(0, (H - height)//2)
+        self.update()
+
 #-Mouse Interaction--------------------------------------------------------------------------------------
 
     def mousePressEvent(self, event):
+        #The squash animation owns the pet for its whole length. Swallow whatever arrives
+        #meanwhile rather than queueing it, so a click cannot interrupt itself.
+        if self._busy:
+            event.accept()
+            return
         #Quite standby phase, lest undetermined behavior
         self._quitStandbyPhase()
         #Flag for pet transformation
@@ -647,23 +888,34 @@ class DesktopPet(QWidget):
         self.setCursor(QCursor(Qt.OpenHandCursor))
 
     def mouseMoveEvent(self, event):
+        #Nothing may move the pet while the click animation is playing
+        if self._busy:
+            event.accept()
+            return
         # If left mouse button is pressed and pet is in drag state
         if Qt.LeftButton and self._draging:
             #call on move function defined below
             self._petDragMovement(event.globalPos())
         event.accept()
 
-    def _endDrag(self):
+    def _endDrag(self, clickButton=None):
         '''Leave the drag state: stop following, restore the standing window and label.
 
         Called both by mouseReleaseEvent and by the safety net in _frame_has_passed, so
-        every teardown step lives in exactly one place.
+        every teardown step lives in exactly one place. clickButton is the button that was
+        released, or None when the safety net noticed the button had gone up by itself; a
+        plain click only counts as one when we know it was the left button.
         '''
         #Stop following the cursor FIRST. If any later step misbehaves, the pet must not
         #be left glued to the mouse: "should the pet follow" is _draging AND a live
         #_dragRadius, and both are cleared before anything else runs.
         self._pressTimer.stop()
         was_drag = self._draging and self._dragged
+        #A plain click is a left press that took the draggable path but never grew into a
+        #drag. _dragRadius is only ever set by that path and is still set at this point, so
+        #it is a reliable witness. The safety net passes no button and can never qualify,
+        #which is right: it only fires once a drag is already under way.
+        plainClick = (not was_drag) and clickButton == Qt.LeftButton
         self._draging = False
         self._dragged = False
         #Hand the mouse back before anything else can fail, otherwise the grab would
@@ -707,12 +959,21 @@ class DesktopPet(QWidget):
             self._dragPixmaps.clear()
             self._swing = None
             self.move(keep_x, keep_y)
-        #resume standby phase
-        self._beginStandbyPhase()
+        if plainClick:
+            #A plain click answers with the squash animation. The animation holds the pet for
+            #its whole length and only resumes standby when it finishes, so wandering cannot
+            #start halfway through it.
+            self._startSquash()
+        else:
+            #resume standby phase
+            self._beginStandbyPhase()
         self.setCursor(QCursor(Qt.ArrowCursor))
 
     def mouseReleaseEvent(self, event):
-        self._endDrag()
+        if self._busy:
+            event.accept()
+            return
+        self._endDrag(event.button())
 
 #Minor Functions-----------------------------------------------------------------------------------------
         
@@ -737,9 +998,16 @@ class DesktopPet(QWidget):
     def shutdown(self):
         #stop the standby timers first so no new worker is spawned while we are tearing down
         self._quitStandbyPhase()
+        #and the click animation, so its timer cannot fire into a half-dead window
+        self._squashTimer.stop()
         if getattr(self, "petImage", None) is not None:
 
             self._check_if_Qt_object_is_already_deleted(self.petImage.stop)
+
+        #silence the sound effects
+        if winsound is not None:
+            self._check_if_Qt_object_is_already_deleted(
+                lambda: winsound.PlaySound(None, winsound.SND_PURGE))
 
         #ask the workers to leave their loops, then wait for their threads
         for threadName, workName in (("_wanderingThread", "_wanderingWork"), ("_speechBubbleThread", "_speechBubbleWork")):
@@ -1016,7 +1284,10 @@ class DesktopPet(QWidget):
 
             #The pendulum's arm and its starting angle both come from where the pet was
             #grabbed, so it is built here - the one moment the grab is known.
-            self._swing = DragSwing((gx, gy), (W, H), self.grabAngle)
+            #amp = config.json 的 amplifier（摇晃强度），只乘驱动项：摆动周期、回正手感、
+            #按下瞬间的姿态都不受它影响，改的只是被甩起来的幅度。
+            self._swing = DragSwing((gx, gy), (W, H), self.grabAngle,
+                                    amp=self._amplifier)
             self._rotationMatrixTranslate = False
 
         #paintEvent draws the sprite rotated about the window centre, so the only thing this

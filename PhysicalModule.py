@@ -78,7 +78,7 @@ class DragSwing:
 
     def __init__(self, grabLocal, spriteSize, grabAngleDeg,
                  g=SWING_G, zeta=SWING_ZETA, kv=SWING_KV, ka=SWING_KA,
-                 tau=SWING_TAU, tau_a=SWING_TAU_A):
+                 tau=SWING_TAU, tau_a=SWING_TAU_A, amp=1.0):
         spriteWidth, spriteHeight = spriteSize
         #摆长：抓取点到贴图中心。贴图中心才是质心，窗口中心（含 MARGIN）不是
         self.r = max(math.hypot(-(spriteWidth/2.0 - grabLocal[0]),
@@ -86,6 +86,9 @@ class DragSwing:
         self.omega0 = math.sqrt(g / self.r)
         self.zeta, self.kv, self.ka = zeta, kv, ka
         self.tau, self.tau_a = tau, tau_a
+        #amp 是 config.json 的 amplifier（摇晃强度），只乘驱动项，见 step()。
+        #默认 1.0 = 老行为：1.0 在 IEEE754 下是乘法的恒等元，逐位等价。
+        self.amp = float(amp)
         #t=0 时渲染角为 0，也就是保持被抓住的姿态
         self.theta = -math.radians(grabAngleDeg)
         self.omega = 0.0
@@ -102,9 +105,11 @@ class DragSwing:
         '''推进一帧，返回「在 grabAngle 之上还要再转多少度」。'''
         self._sample(cursorPos.x(), cursorPos.y(), dt)
 
-        #两个通道叠加后投影到摆的切线方向
-        effectiveX = self.ka*self._ax + self.kv*self._vx
-        effectiveY = self.ka*self._ay + self.kv*self._vy
+        #两个通道叠加后投影到摆的切线方向。
+        #amp 只乘在这里：重力回复项、阻尼项都不碰它，所以 ω₀、ζ、θ₀ 和平衡位置
+        #全部与 amp 无关 —— 摇晃强度改的是幅度，不是摆的节奏。
+        effectiveX = self.amp * (self.ka*self._ax + self.kv*self._vx)
+        effectiveY = self.amp * (self.ka*self._ay + self.kv*self._vy)
         drive = -(effectiveX*math.cos(self.theta) - effectiveY*math.sin(self.theta)) / self.r
         alpha = (-(self.omega0 ** 2) * math.sin(self.theta)     #重力回复
                  - 2.0 * self.zeta * self.omega0 * self.omega   #阻尼
