@@ -99,19 +99,15 @@ class DesktopPet(QWidget):
 #Initialization------------------------------------------------------------------------------------------
         
     def _init(self):
+        #-- window mode -------------------------------------------------------------
+        #How the pet is realised on screen, behind one interface. Everything that depends on
+        #that choice goes through this object: window flags and size, where the pet is, and
+        #how a drag moves it. The rest of this file never asks which mode it is.
+        self._mode = TrayMode(self)
         #FramelessWindowHint: create a frameless window
         #WindowStaysOnTopHint: keep window on top
-        #SubWIndow: keep the window a subwindow regardless of the existance of parent window
-        #config.json 的 showInTaskbar 打开时改用 Qt.Window（正常顶层窗口）：任务栏会长出
-        #条目，录屏软件（OBS 等）也才能把它列成窗口捕获源。SubWindow/Tool 这类窗口在
-        #Windows 上带着 WS_EX_TOOLWINDOW，任务栏和捕获列表里都不会出现。
-        #无边框、透明、置顶三件事不受影响。
-        #用 .get 读，老 config.json 没有这个键时按「关」处理。
-        if self._settingMenu.getConfig().get('showInTaskbar', False):
-            self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Window)
-        else:
-            self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
-        # self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        #The third flag is the mode's business; see TrayMode.configureWindow.
+        self._mode.configureWindow()
 
         #The window has no title bar, so nothing draws this text. It is what the taskbar
         #hover tip, Alt+Tab and the OBS window list read though, which is the whole point:
@@ -148,8 +144,7 @@ class DesktopPet(QWidget):
         self.petImage = None
 
         #-- geometry constants ------------------------------------------------------
-        self.WINDOWWIDTH = QApplication.primaryScreen().size().width()
-        self.WINDOWHEIGHT = QApplication.primaryScreen().size().height()
+        #Screen size is the window mode's answer now; see self._mode.screenRect().
         #Sprite canvas size, read from the artwork itself rather than hardcoded. Every layout
         #constant in this file is derived from these two numbers, so swapping in a
         #differently sized set of drawings no longer means hunting for a magic 549 that
@@ -159,12 +154,6 @@ class DesktopPet(QWidget):
         self.MARGIN = 250
         #Scale of the standing gif and of the drag sprite
         self._petImageSize = 0.8
-        #-- window mode -------------------------------------------------------------
-        #How the pet is realised on screen. The tray mode keeps it in a square window
-        #that moves with it; a full-screen mode would instead pin the window and move the
-        #sprite inside it. Everything that depends on that choice goes through this object:
-        #window sizing, where the pet is, and how a drag moves it.
-        self._trayMode = TrayMode(self)
         #Where the grab point sits inside the window, i.e. the rotation pivot. The pivot does
         #NOT have to be the window centre: keeping it wherever it already is means pressing
         #down never has to move the window, which is what made the pet appear to jump.
@@ -297,19 +286,38 @@ class DesktopPet(QWidget):
     #keeps that code untouched.
     @property
     def _windowSide(self):
-        return self._trayMode.windowSide
+        return self._mode.windowSide
 
     @_windowSide.setter
     def _windowSide(self, value):
-        self._trayMode.windowSide = value
+        self._mode.windowSide = value
 
     @property
     def _spriteInset(self):
-        return self._trayMode.spriteInset
+        return self._mode.spriteInset
 
     @_spriteInset.setter
     def _spriteInset(self, value):
-        self._trayMode.spriteInset = value
+        self._mode.spriteInset = value
+
+    #-- window-mode forwards ----------------------------------------------------
+    #The nested workers (wandering, speech bubble) hold the WINDOW rather than the mode, so
+    #these let them ask where the pet is without knowing how it is realised. Positions here
+    #are always screen coordinates of the PET's top-left corner.
+    def petRect(self):
+        return self._mode.petRect()
+
+    def petBounds(self):
+        return self._mode.petBounds()
+
+    def screenRect(self):
+        return self._mode.screenRect()
+
+    def petSize(self):
+        return self._mode.petSize()
+
+    def placePetAt(self, x, y):
+        self._mode.placePetAt(x, y)
 
     def _readSpriteSize(self):
         '''Pixel size of the pet's artwork, read from the image files themselves.
@@ -429,22 +437,23 @@ class DesktopPet(QWidget):
 
     #Adjust the position when opening the menu
     def _settingMenuMove(self):
-        currPos = self.pos()
+        pet = self.petRect()
+        screen = self.screenRect()
         menuSize = self._settingMenu.size()
-        #Reference the PET, not the window. The window is deliberately oversized so the sprite
-        #can rotate without being clipped, so measuring from it would leave the menu floating
-        #out in the empty border instead of sitting beside her.
-        petLeft = currPos.x() + self._spriteInset
-        petTop = currPos.y() + self._spriteInset
-        petSide = int(self.ORGINALWIDTH*self._petImageSize)
+        #Reference the PET, not the window: measuring from the window would leave the menu
+        #floating out in the empty border instead of sitting beside her.
+        petRight = pet.x() + pet.width()
+        petBottom = pet.y() + pet.height()
+        screenRight = screen.x() + screen.width()
+        screenBottom = screen.y() + screen.height()
         #prefer the right of the pet, fall back to the left if the menu would leave the screen
-        if self.WINDOWWIDTH - (petLeft + petSide) >= menuSize.width():
-            x = petLeft + petSide
+        if screenRight - petRight >= menuSize.width():
+            x = petRight
         else:
-            x = petLeft - menuSize.width()
-        y = petTop + petSide//2 - menuSize.height()//2
-        if y + menuSize.height() > self.WINDOWHEIGHT:
-            y = self.WINDOWHEIGHT - menuSize.height()
+            x = pet.x() - menuSize.width()
+        y = pet.y() + pet.height()//2 - menuSize.height()//2
+        if y + menuSize.height() > screenBottom:
+            y = screenBottom - menuSize.height()
             return self._settingMenu.move(x,y)
         if y < 0: 
             y = 0
@@ -474,8 +483,7 @@ class DesktopPet(QWidget):
         self._changeFacingDirection(random.randint(0,1))
 
         #go to a random position on the desktop
-        randomPos = self._randomPos()
-        self._trayMode.moveWindow(randomPos[0], randomPos[1])
+        self._teleport()
 
 #Pet Standby Actions-------------------------------------------------------------------------------------
 
@@ -515,7 +523,7 @@ class DesktopPet(QWidget):
         self._wanderingThread.finished.connect(self._wanderingThread.deleteLater)
 
         #Move desktop Pet upon receiving the signal date
-        self._wanderingWork.moveSignal.connect(lambda coor: self._trayMode.moveWindow(coor[0], coor[1]))
+        self._wanderingWork.moveSignal.connect(lambda coor: self.placePetAt(coor[0], coor[1]))
 
         #Change the facing of pet upon reciving the facing data
         self._wanderingWork.changeFacingDirectionSignal.connect(lambda facing: self._changeFacingDirection(facing))
@@ -549,18 +557,16 @@ class DesktopPet(QWidget):
 
         def run(self):
             #The range of movement distance is movementrange "mr" pixel to both side
-            #Get the current position
-            currentPos = self.mainWindow.pos()
-            screenSize = QApplication.primaryScreen().size()
+            #Everything below works in PET screen coordinates - the sprite's top-left corner.
+            #Where the window is, or whether there even is one, is the mode's business.
+            currentPos = self.mainWindow.petRect().topLeft()
+            screen = self.mainWindow.screenRect()
+            petSize = self.mainWindow.petSize()
             #random a destine position with random.randint(a,b). a and b equals to either 0 or maxscreen (width/height  - half of the desktop pet size) if out of screen. (that's some long ass code!)
-            #Bound the move by the SPRITE's rect, not the window's. The window is deliberately
-            #oversized so the pet can rotate without being clipped, so bounding the window
-            #would keep her needlessly far from the edges of the screen.
-            inset = self.mainWindow._spriteInset
-            side = int(self.mainWindow.ORGINALWIDTH*self.mainWindow._petImageSize)
-            #The window positions that keep the whole sprite on screen
-            minX, maxX = -inset, screenSize.width() - side - inset
-            minY, maxY = -inset, screenSize.height() - side - inset
+            #Bound the move by the SPRITE's rect: that is what has to stay on screen, and it
+            #is also what the user sees.
+            minX, maxX = screen.left(), screen.right() - petSize.width()
+            minY, maxY = screen.top(), screen.bottom() - petSize.height()
             xStart = min(max(currentPos.x() - self.mr, minX), maxX)
             xEnd = min(max(currentPos.x() + self.mr, minX), maxX)
             xDestiny = random.randint(min(xStart,xEnd),max(xStart,xEnd))
@@ -591,8 +597,8 @@ class DesktopPet(QWidget):
             self.changeFacingDirectionSignal.emit(1 if xDestiny <0 else 0)
 
             #apply the change. 
-            x = self.mainWindow.pos().x()
-            y = self.mainWindow.pos().y()
+            x = self.mainWindow.petRect().x()
+            y = self.mainWindow.petRect().y()
             for i in range(gcf):
                 #leave immediately if the pet is quitting, the window may already be gone
                 if self._stopRequested:
@@ -685,16 +691,10 @@ class DesktopPet(QWidget):
 
         def placeBubble(coor, bubble=self._speechBubble):
             bubble.move(coor[0], coor[1])
-            #Reveal only once the pet is back in its standing layout.
-            #
-            #A click dialog is created while the button is still down, and in that state
-            #_spriteExtents() measures the pet from the GRAB POINT rather than from the
-            #sprite's own centre - so unless the click landed dead centre, the first few
-            #positions the worker sends are wrong, and the bubble would be seen sitting over
-            #the pet's face before jumping up to its head. Waiting for the release means the
-            #first place it is ever seen is the place it belongs. Scheduled dialogs fire
-            #with the pet already standing, so they are unaffected.
-            if bubble.windowOpacity() == 0.0 and self._dragRadius is None:
+            #Reveal on the first position the worker sends. That place is already the right one
+            #even mid-drag, because the bubble is positioned from the sprite's own rect rather
+            #than from the window - so there is nothing to wait for.
+            if bubble.windowOpacity() == 0.0:
                 bubble.setWindowOpacity(1.0)
 
         self._speechBubbleWork.move.connect(placeBubble)
@@ -763,7 +763,8 @@ class DesktopPet(QWidget):
 
         def run(self):
             #Get the size of the screen
-            screenWidth = QDesktopWidget().screenGeometry(0).width()
+            screen = self.mainWindow.screenRect()
+            screenWidth = screen.x() + screen.width()
             selfWidth = self.speechBubble.width()
             selfHight = self.speechBubble.height()
             try:
@@ -771,24 +772,22 @@ class DesktopPet(QWidget):
                     #leave immediately if the pet is quitting, the window may already be gone
                     if self._stopRequested:
                         return
-                    mainPos = self.mainWindow.pos()
-                    #Where the pet actually reaches right now. The window is not always the
-                    #standing one - a press blows it up to 2R and hangs the sprite off the
-                    #centre at an angle BEFORE the click dialog fires - so ask for the real
-                    #outline instead of assuming an upright sprite at a fixed inset.
-                    centreX = mainPos.x() + self.mainWindow.width()//2
-                    centreY = mainPos.y() + self.mainWindow.height()//2
-                    left, top, right, bottom = self.mainWindow._spriteExtents()
+                    #Where the pet is. This is the SPRITE's rect, not the window's: the window
+                    #is deliberately oversized, and while a drag is in progress its centre is
+                    #the grab point rather than the sprite's centre - so measuring from the
+                    #window puts the bubble in the wrong place. The sprite rect does not move
+                    #as the pet swings, which also keeps the bubble from bobbing with it.
+                    pet = self.mainWindow.petRect()
 
-                    #Sit the bubble on the top edge of the rotated image, centred on it
-                    xPos = int(centreX + (left+right)/2 - selfWidth//2)
-                    yPos = int(centreY + top - selfHight)
+                    #Sit the bubble on the top edge of the image, centred on it
+                    xPos = pet.center().x() - selfWidth//2
+                    yPos = pet.top() - selfHight
 
                     #prevent the speech bubble from going off screen
                     if xPos < 0: xPos = 0
                     elif xPos+selfWidth>screenWidth: xPos = screenWidth - selfWidth
                     #If the space above desktop isn't enought, move the speech bubble down
-                    if yPos < 0: yPos = int(centreY + bottom)
+                    if yPos < 0: yPos = pet.bottom()
 
                     self.move.emit([int(xPos), int(yPos)])
                     #FPS
@@ -931,7 +930,6 @@ class DesktopPet(QWidget):
         if event.button() == Qt.LeftButton and self._draggable:
             self._frame_counter_start()
             #adjust anchor of movement position
-            self._drag_pos = event.globalPos() - self.pos()
             self._previous_drag_pos = event.globalPos()
             #Initiate frame rate calculation
             #Grow the window so the sprite can swing about the grab point without ever
@@ -943,7 +941,7 @@ class DesktopPet(QWidget):
             #The window side, the sprite's place inside it and the pivot are all the window
             #mode's business. It records the grab point as the pivot and moves nothing, which
             #is what keeps a click from making the pet jump.
-            self._trayMode.beginDrag(self._drag_pos)
+            self._mode.prepareDrag(event.globalPos())
             #paintEvent draws the rotating sprite, so the gif label steps aside
             self.petLabel.hide()
             self.repaint()
@@ -1004,21 +1002,18 @@ class DesktopPet(QWidget):
             self.repaint()
         #Back to the standing window. This also covers a plain click, which resized
         #and hid the label on press but never got as far as a real drag.
-        if self._dragRadius is not None:
-            #Where the window has to go back to is the window mode's business, and it has to
-            #be worked out BEFORE the drag state is cleared, because the answer depends on
-            #_spriteOrigin.
-            keep_x, keep_y = self._trayMode.dragExitPos()
+        if self._mode.isDragging():
+            #Geometry teardown belongs to the mode. It has to run BEFORE the drag state is
+            #cleared, because where the pet ends up depends on _spriteOrigin.
+            self._mode.endDrag()
             #Back to the standing look. There is NO resize here: the window was already the
-            #standing size all along, so releasing only has to put it back where it belongs,
-            #in ONE move so Windows has no gap to present a half-restored frame in.
+            #standing size all along, so releasing only has to put it back where it belongs.
             self.petLabel.show()
             self._dragRadius = None
             self._spriteOrigin = None
             self._dragAngleDeg = 0.0
             self._dragPixmaps.clear()
             self._swing = None
-            self._trayMode.moveWindow(keep_x, keep_y)
         if plainClick:
             #A plain click is the only thing that talks. It is also the only thing that
             #squashes, so both share one definition of "a click": a right press opens the
@@ -1102,7 +1097,8 @@ class DesktopPet(QWidget):
 
     def _randomPos(self) -> int:
         '''A random spot on the screen where the pet fits. Delegates to the window mode.'''
-        return self._trayMode.randomPos()
+        point = self._mode.randomPetPos()
+        return (point.x(), point.y())
 
 # -- Dragging functions --------------------------------------------------------------------------
     
@@ -1140,7 +1136,7 @@ class DesktopPet(QWidget):
             #real fix; this is what keeps a future regression from becoming a stuck mouse.
             if self._draging and not (QApplication.mouseButtons() & Qt.LeftButton):
                 self._endDrag()
-            if self._draging and self._dragRadius is not None:
+            if self._draging and self._mode.isDragging():
                 # Grant pet physic effect
                 self._petDraggedMove()
 
@@ -1154,13 +1150,13 @@ class DesktopPet(QWidget):
         speech bubble - both use this, so neither has to assume the sprite is upright.
         Delegates to the window mode.
         '''
-        return self._trayMode.spriteExtents()
+        return self._mode.reachFromPivot()
 
     def _petDraggedMove(self) -> None:
         '''Moving Pet alone with the cursor'''
-        #A live drag radius is what makes the pet follow: without it there is no pivot to
+        #A live drag state is what makes the pet follow: without it there is no pivot to
         #park on the cursor, and no valid buffer to move inside.
-        if self._dragRadius is None:
+        if not self._mode.isDragging():
             return
         eventPos = QCursor.pos()
         dx = abs(self._FacingDirectionUpdate(eventPos))
@@ -1173,7 +1169,7 @@ class DesktopPet(QWidget):
         #Park the pivot on the cursor, and keep the whole pet on screen while doing it.
         #On the first tick after a press this is a no-op, because the cursor has not moved
         #and the pivot is still exactly where it was grabbed.
-        self._trayMode.parkPivotAt(eventPos)
+        self._mode.followCursor(eventPos)
 
 
     #This function decides the type of movement desktoppet is experiencing.
@@ -1334,7 +1330,7 @@ class DesktopPet(QWidget):
 
     def _resize(self, at=None):
         '''Rebuild the window for the current sprite scale. Delegates to the window mode.'''
-        self._trayMode.applyScale(at)
+        self._mode.applyScale(at)
 
     def _dragSprite(self, direction):
         '''Scaled drag sprite for a facing direction, built once and reused.'''
@@ -1346,19 +1342,22 @@ class DesktopPet(QWidget):
         return self._dragPixmaps[key]
 
     def paintEvent(self, event):
-        #While dragging the pet is drawn here instead of by petLabel, rotated about the
-        #window centre that _petDraggedMove keeps parked under the cursor. Rotating in the
-        #painter is what lets the sprite take any angle without ever being clipped.
-        if self._dragRadius is None:
+        #While dragging the pet is drawn here instead of by petLabel, rotated about the pivot
+        #that followCursor keeps parked under the cursor. Rotating in the painter is what lets
+        #the sprite take any angle without ever being clipped.
+        if not self._mode.isDragging():
             return
-        pivotX, pivotY = self._pivotOffset.x(), self._pivotOffset.y()
+        #Where to draw, and what to rotate about, are the mode's answers: in tray mode the
+        #sprite sits at a fixed inset in a window that follows the pet, in full-screen mode
+        #its place inside the window IS the pet's position.
+        pivot = self._mode.pivotInWindow()
+        origin = self._mode.spriteOriginInWindow()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        painter.translate(pivotX, pivotY)
+        painter.translate(pivot.x(), pivot.y())
         painter.rotate(self._dragAngleDeg)
-        painter.translate(-pivotX, -pivotY)
-        painter.drawPixmap(self._spriteOrigin[0], self._spriteOrigin[1],
-                           self._dragSprite(self._facingDirection))
+        painter.translate(-pivot.x(), -pivot.y())
+        painter.drawPixmap(origin.x(), origin.y(), self._dragSprite(self._facingDirection))
         
         
 
@@ -1378,7 +1377,8 @@ class DesktopPet(QWidget):
             self._resize()
 
     def _teleport(self):
-        self._trayMode.teleport()
+        point = self._mode.randomPetPos()
+        self._mode.placePetAt(point.x(), point.y())
         
         
 
