@@ -187,7 +187,13 @@ class PetMode(ABC):
 
         两种模式的算法相同：都是"把宠物放好，让枢轴落在 (px, py)"。工具栏模式下
         这会移动窗口，全屏模式下这会移动贴图，但接口层面是同一句话，所以放在基类。
+
+        不在拖拽态时是**空操作**。主流程本来就守着这个前提，但安全网可能在一次拖拽
+        中途把状态清掉（平台丢了鼠标抓取时它会抢先收尾），这时候再来一帧跟随请求就是
+        无事可做——不该让它拿着空的抓取点去算，那是一个会崩在 Qt 定时器回调里的异常。
         '''
+        if not self.isDragging():
+            return
         left, top, right, bottom = self.reachFromPivot()
         screen = self.screenRect()
         rightEdge = screen.x() + screen.width()

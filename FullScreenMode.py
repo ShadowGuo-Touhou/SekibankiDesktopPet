@@ -87,13 +87,18 @@ class FullScreenMode(PetMode):
     def placePetAt(self, x, y):
         '''把宠物贴图左上角放到屏幕坐标 (x, y)。
 
-        只重绘**旧位置和新位置合起来的那块**，不是整个屏幕：这个窗口有 4K 那么大，
-        整屏重绘会让拖拽明显掉帧。
+        只重绘**要重绘的那一块**，不是整个屏幕：这个窗口有 4K 那么大，整屏重绘会让
+        拖拽明显掉帧。
+
+        拖拽期间那块是**旋转包围盒**，不是未旋转的图片矩形——paintEvent 画的是转过
+        角度的贴图，能比图片矩形多伸出去约 90px；按图片矩形失效的话，多出来的那一圈
+        永远擦不掉，每一次摆动都会在屏幕上留一道残影。
         '''
-        was = self.petRect()
+        was = self.petBounds() if self.dragging else self.petRect()
         self._spritePos = QPoint(int(x), int(y))
         self._parkLabel()
-        self.refresh(was.united(self.petRect()))
+        now = self.petBounds() if self.dragging else self.petRect()
+        self.refresh(was.united(now))
 
     def randomPetPos(self):
         '''屏幕内一个随机的、保证整只宠物不出屏的落点（宠物左上角）。'''
@@ -128,15 +133,27 @@ class FullScreenMode(PetMode):
     def endDrag(self):
         '''没有窗口要回位——这个模式的窗口从不移动。
 
-        只需要清掉拖拽状态，并把站立标签放回宠物身上（拖拽期间它是藏起来的，
-        而且位置还停在拖拽开始时那一处）。
+        只清掉拖拽状态，并把站立标签放回宠物身上。但**擦干净这件事必须做全**，
+        松手这一帧要同时覆盖三块地方，少一块就会在屏幕上留东西：
+
+          1. 松手前画在屏幕上的那块 —— 旋转着画出来的，比图片矩形大；
+          2. 标签自己停留的旧位置 —— 拖拽期间 _parkLabel() 是空操作，所以标签一直
+             留在**按下之前**那处；调用方随后 show() 会让它在那儿显形一下再被挪走，
+             那块地方不擦就会留下一个完整的旧宠物；
+          3. 宠物最后站定的位置。
+
+        工具栏模式不需要这些：那边移的是窗口，Windows 会把整个窗口重画。
         '''
         if not self.dragging:
             return
+        #All three computed BEFORE the state is cleared, because petBounds() answers
+        #differently once the drag is over.
+        wasDrawn = self.petBounds()
+        labelStale = self._labelScreenRect()
         self.dragging = False
         self._grabInSprite = None
         self._parkLabel()
-        self.refresh(self.petRect())
+        self.refresh(wasDrawn.united(labelStale).united(self.petRect()))
 
     def labelHomeInWindow(self):
         '''站立标签是贴着宠物放的一个贴图大小的方块，所以它就住在宠物左上角。'''
@@ -177,3 +194,13 @@ class FullScreenMode(PetMode):
         '''把站立标签停到宠物左上角。拖拽期间标签是藏起来的，不用管。'''
         if not self.dragging:
             self.pet.petLabel.move(self._toWindow(self._spritePos))
+
+    def _labelScreenRect(self):
+        '''标签**当前**占据的屏幕矩形，不管它是不是藏着的。
+
+        收尾时要拿它擦掉标签停留过的旧位置——藏起来的控件不会自己告诉 Qt
+        "我这里以前有东西"。
+        '''
+        origin = self._screenOrigin()
+        g = self.pet.petLabel.geometry()
+        return QRect(g.x() + origin.x(), g.y() + origin.y(), g.width(), g.height())
