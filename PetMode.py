@@ -170,6 +170,17 @@ class PetMode(ABC):
         '''
 
     @abstractmethod
+    def grabPointInSprite(self):
+        '''抓取点在**贴图本地坐标**里的位置（(0,0) = 贴图左上角）。
+
+        返回：QPoint。
+        拖动时贴图绕抓取点转，所以"抓在她身上哪个部位"决定了起始摆角——抓头顶和
+        抓脚底，挂起来的姿态完全不同。这是 sprite 本地量，两种模式下取法不同：
+        工具栏模式要从窗口坐标减掉内缩，全屏模式要减掉贴图在窗口里的位置。
+        只在拖拽期间才有意义。
+        '''
+
+    @abstractmethod
     def spriteOriginInWindow(self):
         '''paintEvent 画旋转贴图时，贴图左上角对应窗口里的哪个点。
 

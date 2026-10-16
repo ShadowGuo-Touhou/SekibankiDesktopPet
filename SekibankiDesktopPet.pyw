@@ -154,10 +154,6 @@ class DesktopPet(QWidget):
         self.MARGIN = 250
         #Scale of the standing gif and of the drag sprite
         self._petImageSize = 0.8
-        #Where the grab point sits inside the window, i.e. the rotation pivot. The pivot does
-        #NOT have to be the window centre: keeping it wherever it already is means pressing
-        #down never has to move the window, which is what made the pet appear to jump.
-        self._pivotOffset = None
 
         #-- click feedback ----------------------------------------------------------
         #Sound effects, filled in by _initSound
@@ -183,9 +179,6 @@ class DesktopPet(QWidget):
         self._draging = False
         #The pet was actually moved since the button went down; a plain click never drags
         self._dragged = False
-        #Where the pet was grabbed, in window coordinates. _changeDragAngle rewrites this once
-        #per drag so the grabbed point follows the cursor while the sprite rotates.
-        self._drag_pos = None
         #Cursor position of the previous move event, used to derive the drag speed
         self._previous_drag_pos = None
         #Whether the pivot angle of the current grab has been worked out yet
@@ -195,14 +188,9 @@ class DesktopPet(QWidget):
         #Closed while the setting menu is open, so dragging cannot fight the menu
         self._draggable = True
 
-        #-- drag window geometry ----------------------------------------------------
-        #While dragging, the window is a square of side 2*_dragRadius with the grabbed
-        #point sitting exactly at its centre. That makes the window centre the rotation
-        #pivot, so the sprite can swing to any angle without being clipped.
-        #None means "not dragging".
-        self._dragRadius = None
-        #Top-left corner of the sprite inside the drag window
-        self._spriteOrigin = None
+        #-- drag drawing ------------------------------------------------------------
+        #Where she was grabbed, and whether a drag is running at all, belong to the window
+        #mode now (see _mode). What is left here is only how the dragging sprite is DRAWN.
         #Angle the drag sprite is drawn at, i.e. grabAngle + the pendulum's theta
         self._dragAngleDeg = 0.0
         #Scaled drag sprites keyed by (direction, width, height), built once and reused
@@ -279,26 +267,6 @@ class DesktopPet(QWidget):
         #the configuration
         self.SETTING = self._settingMenu.getConfig()
         self._amplifier = self.SETTING['amplifier']
-
-    #The window's side length and the sprite's blank border live in the window mode now.
-    #They stay readable (and writable) on the window itself because the speech-bubble and
-    #wandering code, plus the drag-angle maths, still ask the window for them; forwarding
-    #keeps that code untouched.
-    @property
-    def _windowSide(self):
-        return self._mode.windowSide
-
-    @_windowSide.setter
-    def _windowSide(self, value):
-        self._mode.windowSide = value
-
-    @property
-    def _spriteInset(self):
-        return self._mode.spriteInset
-
-    @_spriteInset.setter
-    def _spriteInset(self, value):
-        self._mode.spriteInset = value
 
     #-- window-mode forwards ----------------------------------------------------
     #The nested workers (wandering, speech bubble) hold the WINDOW rather than the mode, so
@@ -979,14 +947,13 @@ class DesktopPet(QWidget):
         plain click only counts as one when we know it was the left button.
         '''
         #Stop following the cursor FIRST. If any later step misbehaves, the pet must not
-        #be left glued to the mouse: "should the pet follow" is _draging AND a live
-        #_dragRadius, and both are cleared before anything else runs.
+        #be left glued to the mouse: "should the pet follow" is _draging AND the mode
+        #saying so, and both are cleared before anything else runs.
         self._pressTimer.stop()
         was_drag = self._draging and self._dragged
         #A plain click is a left press that took the draggable path but never grew into a
-        #drag. _dragRadius is only ever set by that path and is still set at this point, so
-        #it is a reliable witness. The safety net passes no button and can never qualify,
-        #which is right: it only fires once a drag is already under way.
+        #drag. The safety net passes no button and can never qualify, which is right: it
+        #only fires once a drag is already under way.
         plainClick = (not was_drag) and clickButton == Qt.LeftButton
         self._draging = False
         self._dragged = False
@@ -1000,17 +967,13 @@ class DesktopPet(QWidget):
         if was_drag:
             self._changeFacingDirection(self._facingDirection)
             self.repaint()
-        #Back to the standing window. This also covers a plain click, which resized
-        #and hid the label on press but never got as far as a real drag.
+        #Back to the standing look. There is NO resize here: the window was already the
+        #standing size all along, so releasing only has to put it back where it belongs.
+        #The label goes up FIRST, so the one geometry move inside endDrag has something to
+        #show; the mode then clears its own drag state.
         if self._mode.isDragging():
-            #Geometry teardown belongs to the mode. It has to run BEFORE the drag state is
-            #cleared, because where the pet ends up depends on _spriteOrigin.
-            self._mode.endDrag()
-            #Back to the standing look. There is NO resize here: the window was already the
-            #standing size all along, so releasing only has to put it back where it belongs.
             self.petLabel.show()
-            self._dragRadius = None
-            self._spriteOrigin = None
+            self._mode.endDrag()
             self._dragAngleDeg = 0.0
             self._dragPixmaps.clear()
             self._swing = None
@@ -1142,16 +1105,6 @@ class DesktopPet(QWidget):
 
         return True
 
-    def _spriteExtents(self):
-        '''How far the pet reaches from the centre of its window: (left, top, right, bottom).
-
-        Standing, that is just half the sprite; dragging, it is the bounding box of the
-        rotated sprite. Callers that need the pet's real outline - the edge clamp and the
-        speech bubble - both use this, so neither has to assume the sprite is upright.
-        Delegates to the window mode.
-        '''
-        return self._mode.reachFromPivot()
-
     def _petDraggedMove(self) -> None:
         '''Moving Pet alone with the cursor'''
         #A live drag state is what makes the pet follow: without it there is no pivot to
@@ -1222,14 +1175,16 @@ class DesktopPet(QWidget):
     #simulate the physic effect of pet rotated due to gravity, it is aorund the piovt (where user clicks)
     #Since the grab position doesn't change during the drag, we only need it to run once
         if self._rotationMatrixTranslate:
-            #The pivot angle is measured from the SPRITE centre now, not the window
-            #centre: the drag window is sized to the grab (_getWindowSize), so the
-            #window centre is the grab point and no longer a fixed reference.
+            #The pivot angle is measured from the SPRITE centre: it is the angle of the
+            #vector from her middle to the point the mouse is holding, which is what makes
+            #a grab by the head hang differently from a grab by the feet.
             W = int(self.ORGINALWIDTH*self._petImageSize)
             H = int(self.ORGINALHEIGHT*self._petImageSize)
-            #Grab point in sprite-local coordinates
-            gx = self._drag_pos.x() - self._spriteInset
-            gy = self._drag_pos.y() - self._spriteInset
+            #Grab point in sprite-local coordinates. Where on HER the mouse landed is a
+            #sprite-local question, so the window mode is the one that answers it.
+            grab = self._mode.grabPointInSprite()
+            gx = grab.x()
+            gy = grab.y()
             #Find the difference in Y from the centre of the sprite
             ydiff = H//2 - gy
             #Find the difference in X from the centre of the sprite

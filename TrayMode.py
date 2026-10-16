@@ -32,9 +32,18 @@ class TrayMode(PetMode):
 
     def __init__(self, pet):
         super().__init__(pet)
-        #窗口边长，以及贴图居中后左右各留的空白。由 applyScale 填。
+        #Window side length, and the blank border left around the centred sprite. Filled in
+        #by applyScale.
         self.windowSide = None
         self.spriteInset = None
+        #-- drag state --------------------------------------------------------------
+        #Whether a drag is under way. isDragging() is the only way anything outside this
+        #file asks, so how a drag is represented stays private to the mode.
+        self.dragging = False
+        #The grab point, in WINDOW coordinates. It doubles as the rotation pivot: the window
+        #is never moved on press, so the grabbed spot is already sitting where it must be.
+        #None while not dragging.
+        self.grabPoint = None
 
 #-- 生命周期 --------------------------------------------------------------------------------------------
 
@@ -118,8 +127,8 @@ class TrayMode(PetMode):
         if not self.isDragging():
             return QRect(self.petRect())
         left, top, right, bottom = self.reachFromPivot()
-        px = self.pet.pos().x() + self.pet._pivotOffset.x()
-        py = self.pet.pos().y() + self.pet._pivotOffset.y()
+        px = self.pet.pos().x() + self.grabPoint.x()
+        py = self.pet.pos().y() + self.grabPoint.y()
         #Round OUTWARDS, never towards the middle: a bounding box that is a pixel short of
         #the sprite is a bounding box that lies about what it covers.
         x0, y0 = floor(px + left), floor(py + top)
@@ -129,28 +138,31 @@ class TrayMode(PetMode):
 #-- 拖拽 ------------------------------------------------------------------------------------------------
 
     def isDragging(self):
-        '''当前是否处于「按拖拽方式绘制」的状态。
+        '''当前是否处于拖拽态。
 
-        本模式没有独立的拖拽标志：_dragRadius 只在 prepareDrag 里被设、在 endDrag 里
-        被清，所以它是否是 None 就等价于「在不在拖拽态」。
+        上半场这个判断是"拿 _dragRadius 是不是 None 当布尔"，因为那个几何量恰好只在
+        拖拽期间非空。现在有了明确的标志位，就不再借几何量兼职了。
         '''
-        return self.pet._dragRadius is not None
+        return self.dragging
 
     def prepareDrag(self, grabGlobalPos):
-        '''按下：把抓取点记成旋转枢轴。
+        '''按下：把抓取点记下来。它就是旋转枢轴。
 
         窗口在 applyScale 里就已经开到了最坏情况，所以这里**不移动任何东西**——
         这正是"点一下宠物不会跳"的原因。
-
-        抓取点要换算成窗口坐标存进 _drag_pos：paintEvent 的旋转、抓取角计算、
-        包围盒都按窗口坐标做。
         '''
-        self.pet._drag_pos = QPoint(grabGlobalPos.x() - self.pet.pos().x(),
-                                    grabGlobalPos.y() - self.pet.pos().y())
-        self.pet._dragRadius = self.windowSide//2
-        self.pet._spriteOrigin = (self.spriteInset, self.spriteInset)
-        #The grab point in window coordinates IS the pivot, and that is what _drag_pos holds
-        self.pet._pivotOffset = self.pet._drag_pos
+        self.grabPoint = QPoint(grabGlobalPos.x() - self.pet.pos().x(),
+                                grabGlobalPos.y() - self.pet.pos().y())
+        self.dragging = True
+
+    def grabPointInSprite(self):
+        '''抓取点在贴图本地坐标里的位置（(0,0) = 贴图左上角）。
+
+        本模式下贴图左上角在窗口的 (spriteInset, spriteInset) 处，所以减掉内缩就换算
+        过去了。它决定了她被吊起来时的起始摆角。
+        '''
+        return QPoint(self.grabPoint.x() - self.spriteInset,
+                      self.grabPoint.y() - self.spriteInset)
 
     def followCursor(self, cursorScreenPos):
         '''把枢轴停到光标下，并把整只宠物夹在屏幕内。
@@ -171,27 +183,28 @@ class TrayMode(PetMode):
         elif pivot_x > rightEdge - right: pivot_x = rightEdge - right
         if pivot_y < -top: pivot_y = -top
         elif pivot_y > bottomEdge - bottom: pivot_y = bottomEdge - bottom
-        self.pet.move(int(pivot_x - self.pet._pivotOffset.x()),
-                      int(pivot_y - self.pet._pivotOffset.y()))
+        self.pet.move(int(pivot_x - self.grabPoint.x()),
+                      int(pivot_y - self.grabPoint.y()))
 
     def endDrag(self):
-        '''退出拖拽的几何收尾：把窗口放回它该在的地方。
+        '''退出拖拽：把窗口挪回它该在的地方，然后自己把拖拽状态清掉。
 
-        必须在调用方清掉 _spriteOrigin 之前调用——位置是拿它算的。
         没有窗口要回的时候（不在拖拽态）是空操作。
         '''
-        if not self.isDragging():
+        if not self.dragging:
             return
-        keep_x, keep_y = self._dragExitWindowPos()
+        keep_x, keep_y = self._standingPosAfterRelease()
         self.pet.move(keep_x, keep_y)
+        self.dragging = False
+        self.grabPoint = None
 
     def spriteOriginInWindow(self):
         '''paintEvent 画旋转贴图时，贴图左上角在窗口里的位置。'''
         return QPoint(self.spriteInset, self.spriteInset)
 
     def pivotInWindow(self):
-        '''paintEvent 的旋转枢轴，窗口坐标。'''
-        return self.pet._pivotOffset
+        '''paintEvent 的旋转枢轴，窗口坐标。也就是抓取点。'''
+        return self.grabPoint
 
 #-- 本模式私有 ------------------------------------------------------------------------------------------
 
@@ -208,8 +221,8 @@ class TrayMode(PetMode):
         if not self.isDragging():
             return -W/2, -H/2, W/2, H/2
         #Grab point in sprite-local coordinates
-        gx = self.pet._drag_pos.x() - self.spriteInset
-        gy = self.pet._drag_pos.y() - self.spriteInset
+        gx = self.grabPoint.x() - self.spriteInset
+        gy = self.grabPoint.y() - self.spriteInset
         angle = radians(self.pet._dragAngleDeg)
         cosA, sinA = cos(angle), sin(angle)
         left = right = top = bottom = 0.0
@@ -222,15 +235,17 @@ class TrayMode(PetMode):
             top, bottom = min(top, rotY), max(bottom, rotY)
         return left, top, right, bottom
 
-    def _dragExitWindowPos(self):
-        '''退出拖拽时窗口该回到哪，按 (x, y) 返回，窗口坐标。
+    def _standingPosAfterRelease(self):
+        '''松手后窗口该在哪，按 (x, y) 返回，窗口坐标。
 
-        缩小窗口会移动贴图：拖拽期间它坐在 _spriteOrigin，而站立布局把它放在
-        (spriteInset, spriteInset)。算出这个差值，好让贴图留在屏幕上原处而不是跳一下。
-        摆动可能把一两个角甩出屏幕，所以再按最短距离把窗口拉回来。
+        窗口在 applyScale 里一次开到了最坏情况，整个拖拽过程都不改尺寸，所以窗口位置
+        本来就不用动——这里唯一要做的是：摆动可能把贴图甩出屏幕，按最短距离拉回来。
+
+        （上半场这里还有一个"贴图从拖拽位置回到站立内缩"的补偿量。窗口不再在拖拽时
+        改尺寸之后，那个量恒等于 0，已经删掉。）
         '''
-        keep_x = self.pet.pos().x() + self.pet._spriteOrigin[0] - self.spriteInset
-        keep_y = self.pet.pos().y() + self.pet._spriteOrigin[1] - self.spriteInset
+        keep_x = self.pet.pos().x()
+        keep_y = self.pet.pos().y()
         #The sprite is upright again, so it occupies the plain spriteInset rect.
         W = int(self.pet.ORGINALWIDTH*self.pet._petImageSize)
         H = int(self.pet.ORGINALHEIGHT*self.pet._petImageSize)
@@ -239,8 +254,8 @@ class TrayMode(PetMode):
         screen = self.screenRect()
         rightEdge = screen.x() + screen.width()
         bottomEdge = screen.y() + screen.height()
-        if sprite_x < screen.left(): keep_x -= sprite_x - screen.left()
+        if sprite_x < screen.left(): keep_x += screen.left() - sprite_x
         elif sprite_x + W > rightEdge: keep_x -= (sprite_x + W) - rightEdge
-        if sprite_y < screen.top(): keep_y -= sprite_y - screen.top()
+        if sprite_y < screen.top(): keep_y += screen.top() - sprite_y
         elif sprite_y + H > bottomEdge: keep_y -= (sprite_y + H) - bottomEdge
         return keep_x, keep_y
