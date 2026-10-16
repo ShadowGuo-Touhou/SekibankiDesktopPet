@@ -957,8 +957,6 @@ class DesktopPet(QWidget):
             self._draging = False
             self._SettingMenuOpen()
 
-        self._triggerClickDialog()
-
         event.accept()
         #Change the cursor type while draging
         self.setCursor(QCursor(Qt.OpenHandCursor))
@@ -1022,6 +1020,14 @@ class DesktopPet(QWidget):
             self._swing = None
             self._trayMode.moveWindow(keep_x, keep_y)
         if plainClick:
+            #A plain click is the only thing that talks. It is also the only thing that
+            #squashes, so both share one definition of "a click": a right press opens the
+            #menu instead, a press that grew into a drag is not one, and neither is the
+            #safety net (it passes no button).
+            #Firing on RELEASE rather than on press is what makes that possible - whether the
+            #press grew into a drag is only known once the button comes up. It also means the
+            #pet is already standing again, so the bubble is placed against the upright sprite.
+            self._triggerClickDialog()
             #A plain click answers with the squash animation. The animation holds the pet for
             #its whole length and only resumes standby when it finishes, so wandering cannot
             #start halfway through it.
