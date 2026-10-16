@@ -20,7 +20,7 @@
 """
 
 import random
-from math import ceil, floor, hypot, cos, sin, radians
+from math import ceil, hypot
 
 from PyQt5.QtCore import QPoint, QRect, QSize, Qt
 
@@ -48,18 +48,15 @@ class TrayMode(PetMode):
 #-- 生命周期 --------------------------------------------------------------------------------------------
 
     def configureWindow(self):
-        '''按 showInTaskbar 决定窗口是普通顶层窗口还是子窗口。
+        '''小方块窗口，尺寸留给 applyScale。
 
-        Qt.Window 会长出任务栏条目，录屏软件（OBS 等）也才能把它列成窗口捕获源；
-        SubWindow 在 Windows 上带 WS_EX_TOOLWINDOW，两处都不出现。无边框、透明、
-        置顶三件事不受影响。
-        尺寸不在这里定——那时贴图还没建好，留给 applyScale。
-        用 .get 读，老 config.json 没有这个键时按「关」处理。
+        Qt.SubWindow 而不是 Qt.Window：这个模式**故意**不在任务栏里出现，只剩托盘图标。
+        它在 Windows 上带 WS_EX_TOOLWINDOW，所以任务栏和录屏软件的窗口列表都不会列它。
+
+        （"要不要在任务栏里出现"曾经是这个文件里读 config 决定的分支。现在这件事由
+        _pickMode 决定用哪个模式，模式自己不再需要看设置了。）
         '''
-        if self.pet._settingMenu.getConfig().get('showInTaskbar', False):
-            self.pet.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Window)
-        else:
-            self.pet.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
+        self.pet.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
 
     def applyScale(self, at=None):
         '''按当前 _petImageSize 重算窗口尺寸，并重排标签。
@@ -118,23 +115,6 @@ class TrayMode(PetMode):
         return QPoint(random.randint(screen.left(), screen.right() - size.width()),
                       random.randint(screen.top(), screen.bottom() - size.height()))
 
-    def petBounds(self):
-        '''宠物当前的旋转包围盒，屏幕坐标。
-
-        站立时就是 petRect()。拖拽时贴图绕枢轴转，所以取四个角旋转后的包围盒，
-        基准是枢轴在屏幕上的位置。
-        '''
-        if not self.isDragging():
-            return QRect(self.petRect())
-        left, top, right, bottom = self.reachFromPivot()
-        px = self.pet.pos().x() + self.grabPoint.x()
-        py = self.pet.pos().y() + self.grabPoint.y()
-        #Round OUTWARDS, never towards the middle: a bounding box that is a pixel short of
-        #the sprite is a bounding box that lies about what it covers.
-        x0, y0 = floor(px + left), floor(py + top)
-        x1, y1 = ceil(px + right), ceil(py + bottom)
-        return QRect(x0, y0, x1 - x0, y1 - y0)
-
 #-- 拖拽 ------------------------------------------------------------------------------------------------
 
     def isDragging(self):
@@ -164,28 +144,6 @@ class TrayMode(PetMode):
         return QPoint(self.grabPoint.x() - self.spriteInset,
                       self.grabPoint.y() - self.spriteInset)
 
-    def followCursor(self, cursorScreenPos):
-        '''把枢轴停到光标下，并把整只宠物夹在屏幕内。
-
-        抓取点在窗口坐标里就是枢轴，所以把窗口中心停到光标上，任何旋转角下被抓的
-        那一块都还在鼠标底下。这就是取代旧 _drag_pos + "+15" 锚点修正的东西。
-        '''
-        #The window centre is the pivot, so reachFromPivot hands back the bounding box of
-        #the rotated sprite around it; clamping the pivot by those four reach values keeps
-        #the whole pet inside whatever angle it is hanging at.
-        left, top, right, bottom = self.reachFromPivot()
-        screen = self.screenRect()
-        rightEdge = screen.x() + screen.width()
-        bottomEdge = screen.y() + screen.height()
-        pivot_x = cursorScreenPos.x()
-        pivot_y = cursorScreenPos.y()
-        if pivot_x < -left: pivot_x = -left
-        elif pivot_x > rightEdge - right: pivot_x = rightEdge - right
-        if pivot_y < -top: pivot_y = -top
-        elif pivot_y > bottomEdge - bottom: pivot_y = bottomEdge - bottom
-        self.pet.move(int(pivot_x - self.grabPoint.x()),
-                      int(pivot_y - self.grabPoint.y()))
-
     def endDrag(self):
         '''退出拖拽：把窗口挪回它该在的地方，然后自己把拖拽状态清掉。
 
@@ -198,6 +156,10 @@ class TrayMode(PetMode):
         self.dragging = False
         self.grabPoint = None
 
+    def labelHomeInWindow(self):
+        '''站立动画的标签铺满整个窗口，所以常驻位置恒为 (0,0)。'''
+        return QPoint(0, 0)
+
     def spriteOriginInWindow(self):
         '''paintEvent 画旋转贴图时，贴图左上角在窗口里的位置。'''
         return QPoint(self.spriteInset, self.spriteInset)
@@ -207,33 +169,6 @@ class TrayMode(PetMode):
         return self.grabPoint
 
 #-- 本模式私有 ------------------------------------------------------------------------------------------
-
-    def reachFromPivot(self):
-        '''贴图相对**枢轴**伸出多少：(left, top, right, bottom)。
-
-        站立时枢轴就是窗口中心，也就是贴图中心，所以答案就是半个贴图。拖拽时把四个角
-        按绘制角旋转后取包围盒。边界夹取和包围盒都用它。
-
-        注意这是**枢轴相对量**，不是屏幕坐标——要屏幕矩形请用 petBounds()。
-        '''
-        W = int(self.pet.ORGINALWIDTH*self.pet._petImageSize)
-        H = int(self.pet.ORGINALHEIGHT*self.pet._petImageSize)
-        if not self.isDragging():
-            return -W/2, -H/2, W/2, H/2
-        #Grab point in sprite-local coordinates
-        gx = self.grabPoint.x() - self.spriteInset
-        gy = self.grabPoint.y() - self.spriteInset
-        angle = radians(self.pet._dragAngleDeg)
-        cosA, sinA = cos(angle), sin(angle)
-        left = right = top = bottom = 0.0
-        for cornerX, cornerY in ((0,0), (W,0), (0,H), (W,H)):
-            offsetX = cornerX - gx
-            offsetY = cornerY - gy
-            rotX = offsetX*cosA - offsetY*sinA
-            rotY = offsetX*sinA + offsetY*cosA
-            left, right = min(left, rotX), max(right, rotX)
-            top, bottom = min(top, rotY), max(bottom, rotY)
-        return left, top, right, bottom
 
     def _standingPosAfterRelease(self):
         '''松手后窗口该在哪，按 (x, y) 返回，窗口坐标。

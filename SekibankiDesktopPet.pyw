@@ -6,6 +6,7 @@ from PyQt5.QtGui import QPainter
 from PyQt5.QtWidgets import *
 from SettingBox import SettingMenu
 from TrayMode import TrayMode
+from FullScreenMode import FullScreenMode
 from math import pi, atan,atan2, cos, sin, radians, hypot, ceil
 from PhysicalModule import DragSwing
 try:
@@ -98,15 +99,30 @@ class DesktopPet(QWidget):
 
 #Initialization------------------------------------------------------------------------------------------
         
+    def _pickMode(self):
+        '''Pick the window mode.
+
+        This is the ONE place in the program that knows both modes exist; everything
+        downstream only talks to the interface. See PetMode for what that interface promises.
+
+        「在工具栏显示」同时决定两件事，而它们本来就是同一件事的两面：
+          关 -> 工具栏模式。小方块窗口跟着宠物跑，且是 SubWindow（Windows 上带
+                WS_EX_TOOLWINDOW），任务栏和录屏软件的窗口列表里都不出现，只剩托盘图标。
+          开 -> 全屏模式。窗口铺满主屏且永不移动，是普通顶层窗口，任务栏里长出条目。
+        用 .get 读，老 config.json 没有这个键时按「关」处理。
+        '''
+        if self._settingMenu.getConfig().get('showInTaskbar', False):
+            return FullScreenMode(self)
+        return TrayMode(self)
+
     def _init(self):
         #-- window mode -------------------------------------------------------------
         #How the pet is realised on screen, behind one interface. Everything that depends on
         #that choice goes through this object: window flags and size, where the pet is, and
         #how a drag moves it. The rest of this file never asks which mode it is.
-        self._mode = TrayMode(self)
-        #FramelessWindowHint: create a frameless window
-        #WindowStaysOnTopHint: keep window on top
-        #The third flag is the mode's business; see TrayMode.configureWindow.
+        #FramelessWindowHint and WindowStaysOnTopHint are the mode's business too; see
+        #configureWindow.
+        self._mode = self._pickMode()
         self._mode.configureWindow()
 
         #The window has no title bar, so nothing draws this text. It is what the taskbar
@@ -862,6 +878,10 @@ class DesktopPet(QWidget):
         ground and squash the pet towards its middle. Moving the label down by half of the
         height that was lost pins the bottom edge in place, so the pet squashes downwards.
 
+        Where the label lives is the window mode's answer: in tray mode it fills the window,
+        in full-screen mode it sits on the pet. Assuming (0,0) would teleport her to the
+        window corner in the latter.
+
         During a click the content is the static drag sprite; the standing gif is only used
         if a squash somehow starts without one.
         '''
@@ -873,8 +893,12 @@ class DesktopPet(QWidget):
                 W, height, Qt.IgnoreAspectRatio, Qt.SmoothTransformation))
         elif self.petImage is not None:
             self.petImage.setScaledSize(QSize(W, height))
-        self.petLabel.move(0, (H - height)//2)
-        self.update()
+        #Where the label was, so the repaint covers both the old and the new place. Only a
+        #rect, never the whole window: in full-screen mode that window is the whole screen.
+        was = QRect(self.petLabel.geometry())
+        home = self._mode.labelHomeInWindow()
+        self.petLabel.move(home.x(), home.y() + (H - height)//2)
+        self._mode.refresh(was.united(QRect(self.petLabel.geometry())))
 
 #-Mouse Interaction--------------------------------------------------------------------------------------
 

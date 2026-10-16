@@ -32,6 +32,7 @@
 """
 
 from abc import ABC, abstractmethod
+from math import ceil, floor, cos, sin, radians
 
 from PyQt5.QtCore import QPoint, QRect, QSize
 from PyQt5.QtWidgets import QApplication
@@ -121,13 +122,50 @@ class PetMode(ABC):
         return QSize(int(self.pet.ORGINALWIDTH * self.pet._petImageSize),
                      int(self.pet.ORGINALHEIGHT * self.pet._petImageSize))
 
-    @abstractmethod
     def petBounds(self):
-        '''宠物当前的**旋转包围盒**。
+        '''宠物当前的**旋转包围盒**，屏幕坐标。
 
-        返回：QRect，屏幕坐标。
         只在"别让宠物跑出屏幕"这类守卫逻辑里用。定位一律用 petRect()。
+
+        两种模式的算法相同，所以这里给了默认实现：差别只在 grabPointInSprite()
+        怎么算，而枢轴的屏幕位置可以统一由 petRect().topLeft() + 抓取点推出。
         '''
+        if not self.isDragging():
+            return QRect(self.petRect())
+        left, top, right, bottom = self.reachFromPivot()
+        pivot = self.petRect().topLeft() + self.grabPointInSprite()
+        #Round OUTWARDS, never towards the middle: a bounding box that is a pixel short of
+        #the sprite is a bounding box that lies about what it covers.
+        x0, y0 = floor(pivot.x() + left), floor(pivot.y() + top)
+        x1, y1 = ceil(pivot.x() + right), ceil(pivot.y() + bottom)
+        return QRect(x0, y0, x1 - x0, y1 - y0)
+
+    def reachFromPivot(self):
+        '''贴图相对**枢轴**伸出多少：(left, top, right, bottom)。
+
+        站立时枢轴就是贴图中心，答案就是半个贴图。拖拽时把四个角按绘制角绕枢轴
+        旋转后取包围盒。它是**枢轴相对量**，不是屏幕坐标。
+
+        两种模式算法相同（贴图尺寸一样、绘制角一样、只差抓取点怎么算），所以放在
+        基类里。这是边界夹取与 petBounds() 共用的唯一一份旋转数学。
+        '''
+        size = self.petSize()
+        W, H = size.width(), size.height()
+        if not self.isDragging():
+            return -W/2, -H/2, W/2, H/2
+        #Grab point in sprite-local coordinates
+        grab = self.grabPointInSprite()
+        angle = radians(self.pet._dragAngleDeg)
+        cosA, sinA = cos(angle), sin(angle)
+        left = right = top = bottom = 0.0
+        for cornerX, cornerY in ((0,0), (W,0), (0,H), (W,H)):
+            offsetX = cornerX - grab.x()
+            offsetY = cornerY - grab.y()
+            rotX = offsetX*cosA - offsetY*sinA
+            rotY = offsetX*sinA + offsetY*cosA
+            left, right = min(left, rotX), max(right, rotX)
+            top, bottom = min(top, rotY), max(bottom, rotY)
+        return left, top, right, bottom
 
 #-- 拖拽 ------------------------------------------------------------------------------------------------
 
@@ -141,13 +179,29 @@ class PetMode(ABC):
         不变量：**不得移动宠物或窗口**。这是"点一下宠物不会跳"的保证。
         '''
 
-    @abstractmethod
     def followCursor(self, cursorScreenPos):
         '''拖拽跟随：把旋转枢轴停到光标下，并把整只宠物夹在屏幕内。
 
         参数 cursorScreenPos: QPoint，光标在屏幕上的位置。
         返回：无。
+
+        两种模式的算法相同：都是"把宠物放好，让枢轴落在 (px, py)"。工具栏模式下
+        这会移动窗口，全屏模式下这会移动贴图，但接口层面是同一句话，所以放在基类。
         '''
+        left, top, right, bottom = self.reachFromPivot()
+        screen = self.screenRect()
+        rightEdge = screen.x() + screen.width()
+        bottomEdge = screen.y() + screen.height()
+        pivot_x = cursorScreenPos.x()
+        pivot_y = cursorScreenPos.y()
+        #Clamp the PIVOT by how far the rotated sprite reaches from it, so the whole pet
+        #stays inside whatever angle it is hanging at.
+        if pivot_x < screen.left() - left: pivot_x = screen.left() - left
+        elif pivot_x > rightEdge - right: pivot_x = rightEdge - right
+        if pivot_y < screen.top() - top: pivot_y = screen.top() - top
+        elif pivot_y > bottomEdge - bottom: pivot_y = bottomEdge - bottom
+        grab = self.grabPointInSprite()
+        self.placePetAt(pivot_x - grab.x(), pivot_y - grab.y())
 
     @abstractmethod
     def endDrag(self):
@@ -177,7 +231,22 @@ class PetMode(ABC):
         拖动时贴图绕抓取点转，所以"抓在她身上哪个部位"决定了起始摆角——抓头顶和
         抓脚底，挂起来的姿态完全不同。这是 sprite 本地量，两种模式下取法不同：
         工具栏模式要从窗口坐标减掉内缩，全屏模式要减掉贴图在窗口里的位置。
+
+        **不变量：整个拖拽期间它是常数。** 它描述的是"抓住了她身上哪一块"，那一块
+        不会因为宠物被拖动而改变。摆角要靠它算，抖一下整只宠物就会跟着抖。
         只在拖拽期间才有意义。
+        '''
+
+    @abstractmethod
+    def labelHomeInWindow(self):
+        '''站立动画那个标签在窗口里的常驻位置。
+
+        返回：QPoint，**窗口**坐标。
+
+        为什么需要它：压扁动画是把标签本身缩小并往下挪来实现的，所以它必须知道
+        "标签本来该在哪"。工具栏模式下标签铺满整个窗口，答案恒为 (0,0)；全屏模式下
+        标签是贴在宠物位置上的一个贴图大小的方块，答案跟着宠物走。
+        不知道这个，压扁动画会把宠物瞬移到窗口左上角。
         '''
 
     @abstractmethod
@@ -193,6 +262,10 @@ class PetMode(ABC):
         '''paintEvent 的旋转枢轴。
 
         返回：QPoint，**窗口**坐标。
+
+        注意两种模式下它的行为是**相反**的，这正是它必须是个方法的原因：
+          工具栏模式 —— 窗口跟着宠物跑，所以枢轴在窗口里是一个**固定**的点。
+          全屏模式   —— 窗口钉死，所以枢轴在窗口里必须**跟着光标移动**。
         '''
 
 #-- 显示 ------------------------------------------------------------------------------------------------
